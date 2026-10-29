@@ -55,6 +55,6 @@ jobs:
           python -m pip install --quiet pillow
           New-Item -ItemType Directory -Force cases | Out-Null
           python .github/print-repro/make_base.py cases/base.pdf
-      - name: Print each case
+      - name: Print one-change variants of the Thai case
         shell: pwsh
-        run: ./.github/print-repro/run.ps1 -Cli "$PWD\target\x86_64-pc-windows-msvc\release\pdfcraft-cli.exe" -Dir "$PWD\cases" -Printer 'PdfCraftTest'
+        run: ./.github/print-repro/run2.ps1 -Cli "$PWD\target\x86_64-pc-windows-msvc\release\pdfcraft-cli.exe" -Dir "$PWD\cases" -Printer 'PdfCraftTest'
