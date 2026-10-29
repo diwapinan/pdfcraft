@@ -30,6 +30,10 @@ fn blank() -> Vec<u8> {
 const BOXES: [(&str, [f64; 4]); 3] = [("A", [40.0, 400.0, 140.0, 420.0]), ("B", [200.0, 300.0, 300.0, 320.0]), ("C", [60.0, 100.0, 160.0, 120.0])];
 
 fn harness() -> Harness<'static, PdfCraftApp> {
+    harness_in("edit.edit_text")
+}
+
+fn harness_in(tool: &'static str) -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
         app.set_option("language", "en").unwrap();
@@ -41,7 +45,7 @@ fn harness() -> Harness<'static, PdfCraftApp> {
             app.session.apply(id, Edit::AddText { page: 0, text: AddedText { text: text.into(), rect, ..Default::default() } }).unwrap();
         }
         app.set_option("zoom", "100").unwrap();
-        assert!(app.execute("edit.edit_text"));
+        assert!(app.execute(tool));
         app
     });
     crate::support::settle(&mut h);
@@ -156,4 +160,21 @@ fn copy_and_paste_selected_content_keeps_its_group() {
     assert!(after[3].group.is_some() && after[3].group == after[4].group && after[3].group != after[0].group);
     h.get_by_label("2 objects selected"); // the pasted items are selected
     assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Paste"), "one undo step");
+}
+
+/// diw edit: the Add text tool selects several added items with Shift+click too, so they can be
+/// grouped there; a plain click on the page still starts new text, and no area is drawn.
+#[test]
+fn the_add_text_tool_selects_several_items_with_shift_and_groups_them() {
+    let mut h = harness_in("edit.text");
+    select(&mut h, &[0, 1]);
+    h.get_by_label("2 objects selected");
+    key(&mut h, Modifiers::COMMAND, Key::G);
+    let groups: Vec<_> = added(&h).iter().map(|a| a.group).collect();
+    assert!(groups[0].is_some() && groups[0] == groups[1] && groups[2].is_none(), "{groups:?}");
+    // Shift+click on empty page adds nothing and starts no text.
+    let empty = at(&h, 350.0, 50.0);
+    shift_click(&mut h, empty);
+    assert!(h.state().views[0].content.draft.is_none(), "no new text from a Shift+click");
+    assert_eq!(added(&h).len(), 3);
 }

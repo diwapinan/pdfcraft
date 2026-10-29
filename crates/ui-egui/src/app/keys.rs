@@ -69,7 +69,7 @@ impl PdfCraftApp {
                 }
             }
             self.tool_keys(i, ctx);
-            if self.quick_tool == QuickTool::EditText
+            if matches!(self.quick_tool, QuickTool::EditText | QuickTool::AddText)
                 && let Some(doc) = self.session.get(self.views[i].id).filter(|d| d.allows_modification())
             {
                 object_ui::nudge_keys(ctx, &mut self.views[i], doc);

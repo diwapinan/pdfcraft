@@ -239,24 +239,31 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, look: &mut AddedText, extras:
     let e = extras.as_deref_mut().unwrap_or(&mut fallback);
     ui.add_enabled_ui(editing, |ui| {
         row(ui, |ui| {
-            labelled_icon(ui, t, "arrow-up-down", tl!("Line spacing"));
+            let label = labelled_icon(ui, t, "arrow-up-down", tl!("Line spacing"));
             let own = tl!("Auto").to_string();
             let shown = if e.line_spacing == 0.0 { own.clone() } else { number(e.line_spacing) };
-            craft_ui::ComboBox::from_id_salt("format-line-spacing").selected_text(shown).width(half).show_ui(ui, |ui| {
-                ui.selectable_value(&mut e.line_spacing, 0.0, own.as_str());
-                for v in LINE_SPACINGS {
-                    ui.selectable_value(&mut e.line_spacing, v, number(v));
-                }
-            });
+            // Named by the icon before it, for screen readers too.
+            craft_ui::ComboBox::from_id_salt("format-line-spacing")
+                .selected_text(shown)
+                .width(half)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut e.line_spacing, 0.0, own.as_str());
+                    for v in LINE_SPACINGS {
+                        ui.selectable_value(&mut e.line_spacing, v, number(v));
+                    }
+                })
+                .response
+                .labelled_by(label.id);
             ui.add_space(8.0);
             ui.add_enabled_ui(false, |ui| {
-                labelled_icon(ui, t, "pilcrow", tl!("Paragraph spacing"));
+                let label = labelled_icon(ui, t, "pilcrow", tl!("Paragraph spacing"));
                 let tip = format!("{} — {}", tl!("Paragraph spacing"), tl!("Planned"));
                 let _ = craft_ui::ComboBox::from_id_salt("format-paragraph-spacing")
                     .selected_text("0")
                     .width(half)
                     .show_ui(ui, |_| {})
                     .response
+                    .labelled_by(label.id)
                     .on_disabled_hover_text(tip);
             });
         });

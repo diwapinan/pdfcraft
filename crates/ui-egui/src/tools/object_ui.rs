@@ -201,7 +201,9 @@ fn leave_single(view: &mut DocView) {
 
 /// Returns true while group selection owns the interaction. Ordinary clicks still reach the
 /// single-object text/resize tools. A text draft is finished or discarded through its editor.
-pub(crate) fn page_input(cx: PageToolContext<'_>, view: &mut DocView) -> bool {
+/// diw edit: `added_only` (the Add text tool) selects added content only, with Shift or Ctrl and a
+/// click, and draws no area: a click on the page there still starts new text.
+pub(crate) fn page_input(cx: PageToolContext<'_>, view: &mut DocView, added_only: bool) -> bool {
     let PageToolContext { ui, xf, ptr, page, .. } = cx;
     if view.objects.input_blocked {
         return true;
@@ -220,12 +222,12 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, view: &mut DocView) -> bool {
         return false;
     }
     let mut selection = std::mem::take(&mut view.objects);
-    let result = input(&mut selection, cx, view);
+    let result = input(&mut selection, cx, view, added_only);
     view.objects = selection;
     result
 }
 
-fn input(s: &mut ObjectSelection, cx: PageToolContext<'_>, view: &mut DocView) -> bool {
+fn input(s: &mut ObjectSelection, cx: PageToolContext<'_>, view: &mut DocView, added_only: bool) -> bool {
     let PageToolContext { ui, resp, xf, ptr, page, doc, .. } = cx;
     let pointer = ptr.pos;
     let (pressed, down) = (ptr.pressed().is_some(), ptr.primary_down);
@@ -306,9 +308,9 @@ fn input(s: &mut ObjectSelection, cx: PageToolContext<'_>, view: &mut DocView) -
     let additive = modified(ui);
     // A page-sized background image must not hide editable labels or added notes.
     // Within each kind, prefer the last object as the ordinary single-item tools do.
-    let hit = [ObjectKind::Added, ObjectKind::Text, ObjectKind::Image]
-        .into_iter()
-        .find_map(|kind| objects.iter().rev().find(|o| o.target.kind == kind && screen(xf, info, page, o).expand(2.0).contains(p)));
+    let kinds: &[ObjectKind] = if added_only { &[ObjectKind::Added] } else { &[ObjectKind::Added, ObjectKind::Text, ObjectKind::Image] };
+    let hit =
+        kinds.iter().find_map(|kind| objects.iter().rev().find(|o| o.target.kind == *kind && screen(xf, info, page, o).expand(2.0).contains(p)));
     if additive {
         if s.page != Some(page) {
             s.clear();
@@ -327,6 +329,9 @@ fn input(s: &mut ObjectSelection, cx: PageToolContext<'_>, view: &mut DocView) -
             } else {
                 s.notice = Some(tl!("Select at most 1000 objects at a time.").into());
             }
+        } else if added_only {
+            // Shift+click beside the items: nothing to add, and no new text either.
+            return true;
         } else {
             s.gesture = Some(Gesture { start: p, now: p, marquee: true, additive: true });
         }
@@ -356,6 +361,10 @@ fn input(s: &mut ObjectSelection, cx: PageToolContext<'_>, view: &mut DocView) -
         return true;
     }
     s.clear();
+    if added_only {
+        // The Add text tool's own click: select one item, or start new text.
+        return false;
+    }
     // A closed paragraph's width handle reaches past its box, and a press there rewraps the
     // paragraph (as in `edit_text_ui`) instead of starting an area selection (#2276).
     let on_edge = view.line_editor.as_ref().is_none_or(|e| e.page != page)
