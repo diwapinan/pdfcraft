@@ -841,24 +841,43 @@ impl Renderer {
                 return;
             }
         }
-        let mut quality = if interpolate {
+        let requested_resize = x_scale < 1.0 || y_scale < 1.0;
+        // diw edit: an image that is shrunk is always resampled smoothly (area-averaged), as
+        // other viewers do by default. `/Interpolate` only says how to *enlarge* an image whose
+        // resolution is below the output's (ISO 32000-2 §8.9.5.3); nearest-neighbour minification
+        // drops most of a scan's pixels, so scanned pages look broken and jagged on screen.
+        // Enlarged images still follow `/Interpolate`, so hard-edged ones stay sharp, and Type 3
+        // glyph images keep their own rules.
+        let mut smooth = interpolate || (requested_resize && !self.in_type3_glyph);
+        let has_alpha = alpha_data.is_some();
+        let mut may_have_transparency = has_alpha || self.force_images_may_have_transparency();
+        let size_for = |smooth: bool| {
+            image_resampling_size(
+                source_width,
+                source_height,
+                channels,
+                data_len,
+                x_scale,
+                y_scale,
+                MAX_IMAGE_PIXELS,
+                smooth,
+            )
+        };
+        // diw edit: a source too large for the smoothing filter's limits is still shrunk by
+        // nearest-neighbour, as before, rather than skipped.
+        let sized = match size_for(smooth) {
+            None if smooth && !interpolate => {
+                smooth = false;
+                size_for(false)
+            }
+            other => other,
+        };
+        let mut quality = if smooth {
             ImageQuality::Medium
         } else {
             ImageQuality::Low
         };
-        let has_alpha = alpha_data.is_some();
-        let mut may_have_transparency = has_alpha || self.force_images_may_have_transparency();
-        let requested_resize = x_scale < 1.0 || y_scale < 1.0;
-        let (new_width, new_height) = match image_resampling_size(
-            source_width,
-            source_height,
-            channels,
-            data_len,
-            x_scale,
-            y_scale,
-            MAX_IMAGE_PIXELS,
-            interpolate,
-        ) {
+        let (new_width, new_height) = match sized {
             Some(target) => target,
             None => {
                 if image_byte_len(source_width, source_height, 4, MAX_IMAGE_PIXELS).is_none() {
@@ -882,7 +901,7 @@ impl Renderer {
         // pixels. It is shrunk once to exactly its snapped device rectangle and drawn 1:1 at the
         // snapped corner. Otherwise the shrunk raster (rounded up to a whole size) is sampled a
         // second time at a fractional scale and offset, which blurs scans and photos.
-        let snapped = if interpolate
+        let snapped = if smooth
             && requested_resize
             && !self.in_type3_glyph
             && (new_width, new_height) != (source_width, source_height)
@@ -898,7 +917,7 @@ impl Renderer {
         // nearest-sampled straight into premultiplied target RGBA. That skips the full-resolution
         // RGBA copy below and the premultiply pass after it.
         let direct = match &alpha_data {
-            Some(alpha) if needs_resize && !interpolate => nearest_premultiplied_rgba(
+            Some(alpha) if needs_resize && !smooth => nearest_premultiplied_rgba(
                 &image_data,
                 &alpha.data,
                 (source_width, source_height),
@@ -957,7 +976,7 @@ impl Renderer {
                 new_width,
                 new_height,
                 format,
-                interpolate,
+                smooth,
             )
         } else {
             (data, source_width, source_height)
