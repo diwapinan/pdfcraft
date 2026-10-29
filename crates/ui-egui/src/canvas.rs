@@ -703,6 +703,12 @@ pub struct DocView {
     /// Edit text & images: the images per page (by document generation), and the selected one.
     pub(crate) edit_images: HashMap<usize, (u64, Vec<pdfcraft_engine::PageImage>)>,
     pub(crate) objects: crate::object_ui::ObjectSelection,
+    /// diw edit: an Arrange, Group, Align or clipboard action asked for (panel, menu, keys), run by the app.
+    pub(crate) content_action: Option<crate::content_arrange_ui::ContentAction>,
+    /// diw edit: added items to select once an edit has put them on the page (a paste, a reorder).
+    pub(crate) content_select_after: Option<(usize, Vec<usize>)>,
+    /// diw edit: the added items several-object selection held when groups were last followed.
+    pub(crate) content_group_seen: Option<(usize, Vec<usize>)>,
     pub image_selection: Option<crate::edit_text_ui::ImageSelection>,
     /// Select tool: the picture clicked, to copy in its original format.
     pub picked_image: Option<crate::image_pick::PickedImage>,
@@ -1161,6 +1167,9 @@ impl DocView {
             move_background: Default::default(),
             edit_images: HashMap::new(),
             objects: Default::default(),
+            content_action: None,
+            content_select_after: None,
+            content_group_seen: None,
             image_selection: None,
             picked_image: None,
             pending_pick: None,
@@ -1369,6 +1378,8 @@ type PageRenders = (Vec<(usize, f32, u64, Option<Tile>)>, Vec<usize>);
 #[derive(Clone, Copy)]
 struct PageEnv<'a> {
     added: &'a Vec<pdfcraft_engine::Added>,
+    /// diw edit: there is copied added content to paste.
+    can_paste_content: bool,
     allowed: bool,
     author: &'a String,
     auto_delta: Vec2,
@@ -1858,6 +1869,8 @@ fn draw_pages(
 ) -> PageRenders {
     let PageEnv {
         allowed,
+        can_paste_content,
+        editing_content,
         auto_delta,
         avail,
         coarse_scroll,
@@ -2219,6 +2232,10 @@ fn draw_pages(
                 prefs,
                 comments::MenuRights { allowed, can_paste: can_paste_comments, can_modify },
             );
+            return;
+        }
+        // diw edit: selected added content's menu (Copy, Paste, Arrange, Align, Group).
+        if editing_content && view.comments.selected.is_none() && crate::content_arrange_ui::context_menu(ui, view, can_modify, can_paste_content) {
             return;
         }
         // Over a picture (and no comment): Copy Image, as in Acrobat's page menu.
@@ -3427,6 +3444,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let doc_links = if tool == QuickTool::Link { doc.links().to_vec() } else { Vec::new() };
     if editing_content {
         crate::content_ui::after_refresh(view, &added);
+        crate::content_arrange_ui::follow_groups(view, doc, tool == QuickTool::EditText && can_modify);
     } else {
         view.content.selected = None;
     }
@@ -3437,6 +3455,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let prepare_tab_order = (preparing && view.prepare.show_tab_numbers).then(|| crate::forms_ui::tab_order(&form, info));
     let env = PageEnv {
         added: &added,
+        can_paste_content: !app.content_clip.is_empty(),
         allowed,
         animates,
         author: &author,

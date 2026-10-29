@@ -23,6 +23,7 @@ pub mod catalog;
 pub mod commands;
 mod comments;
 pub mod compare;
+pub mod content_arrange;
 mod copy_image;
 pub use copy_image::{PagePicture, picture_at};
 pub mod dates;
@@ -99,13 +100,14 @@ pub use pdfcraft_create::{
     CONVERTIBLE, CreateError, IMAGE_EXTENSIONS, ImageResolution, OFFICE_EXTENSIONS, SourceKind, TEXT_EXTENSIONS, decode_text, source_kind,
 };
 pub use pdfcraft_edit::added::{
-    CHAR_SPACING_LIMIT as ADDED_CHAR_SPACING_LIMIT, paste_place as added_paste_place, paste_rect as added_paste_rect, text_rect as added_text_rect,
-    text_width as added_text_width,
+    AlignBoxes, CHAR_SPACING_LIMIT as ADDED_CHAR_SPACING_LIMIT, align_offsets as added_align_offsets, offset_rect as added_offset_rect,
+    paste_place as added_paste_place, paste_rect as added_paste_rect, text_rect as added_text_rect, text_width as added_text_width,
 };
 pub use pdfcraft_edit::paragraph_align;
 pub use pdfcraft_edit::{
     Added, AddedImage, AddedText, Align as TextAlign, Background, ColourTarget, ColoursConverted, Content as AddedContent, ConvertColours,
-    Family as FontFamily, Hairlines, HairlinesFixed, HeaderFooter, Ink as TextInk, MarkKind, PrinterMarks, Watermark,
+    Family as FontFamily, Hairlines, HairlinesFixed, HeaderFooter, Ink as TextInk, Layer as ContentLayer, ListStyle, MarkKind, PrinterMarks,
+    Watermark, arranged_positions as arranged_content_positions,
 };
 pub use pdfcraft_forms::{
     BorderStyle, CalculatedField, CalculationIssue, CalculationOrder, CheckStyle, Field as FormField, FieldAction, FieldChange, FieldFont,

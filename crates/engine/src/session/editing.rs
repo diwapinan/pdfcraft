@@ -603,6 +603,8 @@ impl Session {
                     | Edit::ReplaceImage { .. }
                     | Edit::PasteContent { .. }
                     | Edit::EditPageImage { .. }
+                    | Edit::ArrangeContent { .. }
+                    | Edit::GroupContent { .. }
             ) || matches!(e, Edit::MoveObjects { objects, .. } | Edit::DeleteObjects { objects, .. } if objects.iter().any(|o| o.kind == ObjectKind::Added))
         });
         let touches_marks = edit.is_none_or(|e| {

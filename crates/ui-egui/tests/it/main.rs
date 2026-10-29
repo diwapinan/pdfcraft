@@ -34,6 +34,7 @@ mod comment_pin;
 mod comments;
 mod compare;
 mod content;
+mod content_arrange;
 mod control;
 mod create;
 mod date_format;

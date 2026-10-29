@@ -18,6 +18,7 @@ jobs:
       PDFCRAFT_BUILD_LABEL: diw edit
       CRAFT_FONTS_DIR: ${{ github.workspace }}\craft-fonts
       CRAFT_FONTS_REQUIRED: "1"
+      CRAFT_I18N_DIR: ${{ github.workspace }}\craft-i18n
       DIST: ${{ github.workspace }}\dist\release
     steps:
       - uses: actions/checkout@v4
@@ -27,6 +28,24 @@ jobs:
         run: |
           git clone https://github.com/storytold/craft-fonts craft-fonts
           git -C craft-fonts checkout b076417b5880bd4154bd22f00695b1d28c6bea83
+
+      - name: Fetch craft-i18n (the release's pinned revision) and add diw edit's Thai
+        shell: pwsh
+        run: |
+          git clone https://github.com/storytold/craft-i18n craft-i18n
+          git -C craft-i18n checkout (Get-Content craft-i18n.rev).Trim()
+          $th = 'craft-i18n/locales/th/pdfcraft.tsv'
+          $have = @{}
+          foreach ($f in @($th, 'craft-i18n/locales/th/common.tsv')) {
+            foreach ($l in Get-Content -Encoding utf8 $f) { if ($l -notmatch '^#') { $c = $l -split "`t"; if ($c.Count -ge 2) { $have["$($c[0])`t$($c[1])"] = $true } } }
+          }
+          $add = foreach ($l in Get-Content -Encoding utf8 .github/diw-edit/th-extra.tsv) {
+            if ($l -match '^#' -or $l -eq '') { continue }
+            $c = $l -split "`t"
+            if (-not $have["$($c[0])`t$($c[1])"]) { $l }
+          }
+          if ($add) { [System.IO.File]::AppendAllText((Resolve-Path $th), ("`n" + ($add -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false)) }
+          Write-Output "added $(@($add).Count) Thai entries"
 
       - name: Rust toolchain
         shell: pwsh

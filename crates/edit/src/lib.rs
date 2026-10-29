@@ -75,8 +75,9 @@ pub use convert_colours::{ColourTarget, ConvertColours, Converted as ColoursConv
 pub use hairlines::{Fixed as HairlinesFixed, Hairlines, fix_hairlines};
 pub mod added;
 pub use added::{
-    Added, AddedImage, AddedText, Align, Content, Family, Ink, MarkerScan, add_content, delete_content, first_undrawable, isolate_content,
-    list_added, scan_markers, update_content,
+    Added, AddedImage, AddedText, Align, AlignBoxes, Content, Family, Ink, Layer, ListStyle, MarkerScan, add_content, align_offsets,
+    arrange_content, arranged_positions, delete_content, first_undrawable, isolate_content, list_added, new_content_group, scan_markers,
+    set_content_group, update_content,
 };
 
 mod apply;

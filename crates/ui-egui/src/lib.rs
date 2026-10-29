@@ -179,6 +179,7 @@ pub use tools::bulk_fields;
 use tools::calc_order_ui;
 use tools::camera_ui;
 pub use tools::comments;
+use tools::content_arrange_ui;
 use tools::content_ui;
 use tools::edit_text_ui;
 pub use tools::field_table_ui;
@@ -750,6 +751,8 @@ pub struct PdfCraftApp {
     os_clipboard: Option<arboard::Clipboard>,
     /// What ⌘V reads instead of the system clipboard (tests).
     pub clipboard_override: Option<create_ui::Clip>,
+    /// diw edit: added content Copy put away for Paste.
+    pub(crate) content_clip: content_arrange_ui::ContentClip,
     /// Attach file: the file to attach instead of asking (tests, automation).
     pub attach_override: Option<(String, Vec<u8>)>,
     /// Duplicate Field: which field and onto which pages.

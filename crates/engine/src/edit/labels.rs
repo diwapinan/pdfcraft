@@ -148,6 +148,12 @@ pub const EDIT_LABELS: &[&str] = &[
     "Edit content",
     "Delete content",
     "Paste",
+    "Bring to Front",
+    "Bring Forward",
+    "Send Backward",
+    "Send to Back",
+    "Group",
+    "Ungroup",
     "Apply redactions",
     "Remove redaction marks",
     "Remove hidden information",
@@ -179,6 +185,8 @@ pub const BATCH_LABELS: &[&str] = &[
     field_table::LABEL,
     "Style",
     crate::find_replace::REPLACE_ALL,
+    "Align",
+    "Distribute",
 ];
 
 impl Edit {
@@ -332,6 +340,13 @@ impl Edit {
             Edit::DeleteContent { .. } | Edit::DeleteObjects { .. } => Label::of("Delete content"),
             Edit::ReplaceImage { .. } => Label::of("Replace image"),
             Edit::PasteContent { .. } | Edit::PasteObjects { .. } => Label::of("Paste"),
+            Edit::ArrangeContent { layer, .. } => Label::of(match layer {
+                pdfcraft_edit::Layer::Front => "Bring to Front",
+                pdfcraft_edit::Layer::Forward => "Bring Forward",
+                pdfcraft_edit::Layer::Backward => "Send Backward",
+                pdfcraft_edit::Layer::Back => "Send to Back",
+            }),
+            Edit::GroupContent { group, .. } => Label::of(if *group { "Group" } else { "Ungroup" }),
             Edit::ApplyRedactions { .. } => Label::of("Apply redactions"),
             Edit::ClearRedactions => Label::of("Remove redaction marks"),
             Edit::RemoveHidden { .. } => Label::of("Remove hidden information"),

@@ -1,5 +1,5 @@
 use super::layout::{
-    Piece, arabic_error, hebrew_error, is_arabic, is_hebrew, is_thai, latin_width, norm, shaped_layout, text_rect, thai_error, wrapped,
+    Piece, arabic_error, has_thai, hebrew_error, is_arabic, is_hebrew, latin_width, norm, shaped_layout, text_rect, thai_error, wrapped_lines,
 };
 use super::types::{AddedText, Align, Family, Ink};
 use super::{
@@ -21,17 +21,21 @@ pub(super) type LaidLine = (String, bool, usize, Vec<Piece>, f64);
 
 /// Where line `i` (`w` wide unstretched, with `spaces` spaces) starts in the box `r`, and its word
 /// spacing. `paragraphs` holds each line's paragraph: a line takes its paragraph's alignment, and
-/// every line of a justified paragraph but its last is stretched to the box's width.
-fn placed(t: &AddedText, r: [f64; 4], paragraphs: &[usize], i: usize, w: f64, spaces: usize, rtl: bool) -> (f64, f64) {
+/// every line of a justified paragraph but its last is stretched to the box's width. diw edit:
+/// `indent` (a list item's lines after its first) moves the line in from the edge it starts at.
+#[allow(clippy::too_many_arguments)]
+fn placed(t: &AddedText, r: [f64; 4], paragraphs: &[usize], i: usize, w: f64, spaces: usize, rtl: bool, indent: f64) -> (f64, f64) {
     let paragraph = paragraphs.get(i).copied().unwrap_or(0);
     let align = t.paragraph_align(paragraph);
     let ends_paragraph = paragraphs.get(i + 1) != Some(&paragraph);
-    let tw = if align == Align::Justify && !ends_paragraph && spaces > 0 { ((r[2] - r[0]) - w).max(0.0) / spaces as f64 } else { 0.0 };
+    let tw =
+        if align == Align::Justify && !ends_paragraph && spaces > 0 { ((r[2] - r[0]) - indent - w).max(0.0) / spaces as f64 } else { 0.0 };
     let x = match align {
         // A right-to-left paragraph's unstretched last line ends at the right edge.
-        Align::Justify if rtl => r[2] - w - tw * spaces as f64,
-        Align::Left | Align::Justify => r[0],
+        Align::Justify if rtl => r[2] - indent - w - tw * spaces as f64,
+        Align::Left | Align::Justify => r[0] + indent,
         Align::Center => r[0] + ((r[2] - r[0]) - w) / 2.0,
+        Align::Right if rtl => r[2] - indent - w,
         Align::Right => r[2] - w,
     };
     (x, tw)
@@ -41,19 +45,38 @@ fn placed(t: &AddedText, r: [f64; 4], paragraphs: &[usize], i: usize, w: f64, sp
 /// come from Type 3 fonts drawn from the craft-fonts face's outlines (no font file is embedded),
 /// with a ToUnicode map for copy and search. Other text uses the item's standard font.
 fn draw_shaped(doc: &mut Document, t: &AddedText, taken: &Dict, fonts: &mut Dict, out: &mut Vec<u8>) -> Result<(), EditError> {
-    let laid = wrapped(t)
+    let lines = wrapped_lines(t);
+    let indents: Vec<f64> = lines.iter().map(|l| l.indent).collect();
+    let laid = lines
         .into_iter()
-        .map(|(line, rtl, paragraph)| shaped_layout(t, &line, rtl).map(|(pieces, w)| (line, rtl, paragraph, pieces, w)))
+        .map(|l| shaped_layout(t, &l.text, l.rtl).map(|(pieces, w)| (l.text, l.rtl, l.para, pieces, w)))
         .collect::<Result<Vec<_>, _>>()?;
-    draw_laid_shaped(doc, t, &laid, taken, fonts, out, shaped_glyph)
+    draw_laid_shaped_indented(doc, t, &laid, &indents, taken, fonts, out, shaped_glyph)
 }
 
 /// [`draw_shaped`] for lines that are already laid out. `outline` is the source of glyph outlines
 /// for a script's face (the craft-fonts faces, or a stand-in in tests).
+#[cfg(test)]
 pub(super) fn draw_laid_shaped(
     doc: &mut Document,
     t: &AddedText,
     laid: &[LaidLine],
+    taken: &Dict,
+    fonts: &mut Dict,
+    out: &mut Vec<u8>,
+    outline: impl Fn(ShapedScript, u32) -> Result<GlyphOutline, GlyphError>,
+) -> Result<(), EditError> {
+    draw_laid_shaped_indented(doc, t, laid, &[], taken, fonts, out, outline)
+}
+
+/// [`draw_laid_shaped`] with each line's indent from the box's edge (a list item's lines after
+/// its first; a missing indent is none).
+#[allow(clippy::too_many_arguments)]
+fn draw_laid_shaped_indented(
+    doc: &mut Document,
+    t: &AddedText,
+    laid: &[LaidLine],
+    indents: &[f64],
     taken: &Dict,
     fonts: &mut Dict,
     out: &mut Vec<u8>,
@@ -82,7 +105,8 @@ pub(super) fn draw_laid_shaped(
         let logical: String = line.encode_utf16().map(|u| format!("{u:04X}")).collect();
         out.extend(format!("/Span <</ActualText <FEFF{logical}>>> BDC\n").bytes());
         let spaces = line.matches(' ').count();
-        let (x, tw) = placed(t, r, &paragraphs, i, *w, spaces, *rtl);
+        let indent = indents.get(i).copied().filter(|v| v.is_finite()).unwrap_or(0.0).max(0.0);
+        let (x, tw) = placed(t, r, &paragraphs, i, *w, spaces, *rtl, indent);
         let y = r[3] - (i as f64 * 1.2 + 0.95) * t.size;
         let mut pen = x;
         let mut current = None;
@@ -140,7 +164,7 @@ pub(super) fn draw(doc: &mut Document, c: &Content, view: [f64; 6], taken: &Dict
             let mut fonts = Dict::new();
             fonts.set(name.clone().into_bytes(), Object::Dict(font));
             let face_or_new = |has: fn(char) -> bool, face: bool| t.text.chars().any(has) && (face || !existing);
-            if t.text.chars().any(is_thai)
+            if has_thai(t)
                 || face_or_new(is_arabic, pdfcraft_fonts::document_arabic_font().is_some())
                 || face_or_new(is_hebrew, pdfcraft_fonts::document_hebrew_font(false).is_some())
             {
@@ -155,14 +179,16 @@ pub(super) fn draw(doc: &mut Document, c: &Content, view: [f64; 6], taken: &Dict
             if t.char_spacing != 0.0 {
                 out.extend(format!("{} Tc\n", n(t.char_spacing)).bytes());
             }
-            let all = wrapped(t);
-            let paragraphs: Vec<usize> = all.iter().map(|(_, _, p)| *p).collect();
-            for (i, (line, ..)) in all.iter().enumerate() {
+            let all = wrapped_lines(t);
+            let paragraphs: Vec<usize> = all.iter().map(|l| l.para).collect();
+            for (i, wl) in all.iter().enumerate() {
+                let line = &wl.text;
                 let w = latin_width(t, line);
+                let indent = if wl.indent.is_finite() { wl.indent.max(0.0) } else { 0.0 };
                 // Baseline: 0.8 em below the line top.
                 let y = r[3] - (i as f64 * 1.2 + 0.95) * t.size;
                 // Justified: word spacing makes every line of a paragraph but its last fill the box.
-                let (x, tw) = placed(t, r, &paragraphs, i, w, line.matches(' ').count(), false);
+                let (x, tw) = placed(t, r, &paragraphs, i, w, line.matches(' ').count(), false, indent);
                 out.extend(format!("1 0 0 1 {} {} Tm {} Tw ", n(x), n(y), n(tw)).bytes());
                 out.extend(literal(&win_ansi(line)));
                 out.extend_from_slice(b" Tj\n");
@@ -230,6 +256,9 @@ pub(super) fn params(c: &Content) -> Dict {
             }
             if let Some(bg) = t.background {
                 d.set(b"Background".to_vec(), arr(&bg));
+            }
+            if t.list != super::types::ListStyle::None {
+                d.set(b"List".to_vec(), Object::Int(t.list.code()));
             }
         }
         Content::Image(i) => {

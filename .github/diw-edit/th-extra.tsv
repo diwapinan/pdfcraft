@@ -1,0 +1,24 @@
+# diw edit: Thai for the added-content Arrange, Group, Align and list controls. Added to craft-i18n's th/pdfcraft.tsv at build time where it has none (context, English, Thai; TAB separated).
+	Bring to Front	นำมาไว้หน้าสุด
+	Bring Forward	เลื่อนมาข้างหน้า
+	Send Backward	เลื่อนไปข้างหลัง
+	Send to Back	ส่งไปไว้หลังสุด
+	Group	จัดกลุ่ม
+	Ungroup	ยกเลิกกลุ่ม
+	Align centers	จัดกึ่งกลางแนวนอน
+	Align top	จัดชิดบน
+	Align middles	จัดกึ่งกลางแนวตั้ง
+	Align bottom	จัดชิดล่าง
+	Distribute horizontally	กระจายแนวนอน
+	Distribute vertically	กระจายแนวตั้ง
+	Arrange	จัดเรียง
+	Layer	ลำดับชั้น
+	No list	ไม่มีรายการ
+	Bulleted list	รายการสัญลักษณ์
+	Numbered list	รายการลำดับเลข
+	One item lines up with the page.	ชิ้นเดียวจะจัดแนวกับหน้ากระดาษ
+	select three or more items (or groups) to distribute	เลือกตั้งแต่สามชิ้น (หรือสามกลุ่ม) ขึ้นไปเพื่อกระจาย
+	select added content first	เลือกเนื้อหาที่เพิ่มไว้ก่อน
+	the selection is already lined up	สิ่งที่เลือกจัดแนวอยู่แล้ว
+	Thai numerals (1. 2. 3.)	เลขไทย (๑. ๒. ๓.)
+	Thai letters (ko, kho, kho)	อักษรไทย (ก. ข. ค.)

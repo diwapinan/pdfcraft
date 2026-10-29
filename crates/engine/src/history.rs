@@ -102,6 +102,8 @@ pub(crate) fn scope_of(edit: &Edit) -> Scope {
         | Edit::ReplaceImage { .. }
         | Edit::PasteContent { .. }
         | Edit::PasteObjects { .. }
+        | Edit::ArrangeContent { .. }
+        | Edit::GroupContent { .. }
         | Edit::AddHeaderFooter { .. }
         | Edit::AddWatermark { .. }
         | Edit::AddBackground { .. }

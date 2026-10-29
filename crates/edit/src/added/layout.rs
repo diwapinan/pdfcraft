@@ -22,6 +22,16 @@ pub fn lines(t: &AddedText) -> Vec<String> {
     wrapped(t).into_iter().map(|(line, ..)| line).collect()
 }
 
+/// diw edit: a line after wrapping, with how far it is drawn in from the box's left edge: a
+/// list item's lines after its first are indented past its marker (a hanging indent).
+pub(super) struct WrappedLine {
+    pub text: String,
+    pub rtl: bool,
+    pub indent: f64,
+    /// The paragraph (line typed with Enter) the line is in, for its alignment.
+    pub para: usize,
+}
+
 #[cfg(test)]
 thread_local! {
     /// How often [`wrapped`] laid a text out on this thread, for the test that keeps it out of per-line loops.
@@ -31,11 +41,51 @@ thread_local! {
 /// [`lines`], each with whether its paragraph runs right to left (its first strong character
 /// does) and which paragraph it is in.
 pub(super) fn wrapped(t: &AddedText) -> Vec<(String, bool, usize)> {
+    wrapped_lines(t).into_iter().map(|l| (l.text, l.rtl, l.para)).collect()
+}
+
+/// The marker a paragraph starts with in `t`'s list, with the space after it, and the paragraph's
+/// item number: empty paragraphs (blank lines) have no marker and aren't counted.
+pub(super) fn list_markers(t: &AddedText) -> Vec<Option<String>> {
+    let mut n = 0usize;
+    t.text
+        .split('\n')
+        .map(|para| {
+            if para.trim().is_empty() {
+                return None;
+            }
+            n = n.saturating_add(1);
+            t.list.marker(n).map(|m| format!("{m} "))
+        })
+        .collect()
+}
+
+/// [`wrapped`] with each line's indent. A list item's marker starts its first line and its text
+/// wraps to the width left after the marker, so every line of the item starts at the same place.
+pub(super) fn wrapped_lines(t: &AddedText) -> Vec<WrappedLine> {
     #[cfg(test)]
     WRAP_CALLS.with(|c| c.set(c.get().saturating_add(1)));
     let width = (t.rect[2] - t.rect[0]).max(t.size);
     let mut out = Vec::new();
-    for (index, para) in t.text.split('\n').enumerate() {
+    for (index, (para, marker)) in t.text.split('\n').zip(list_markers(t)).enumerate() {
+        let Some(marker) = marker else {
+            out.extend(wrap_paragraph(t, para, width).into_iter().map(|(text, rtl)| WrappedLine { text, rtl, indent: 0.0, para: index }));
+            continue;
+        };
+        let indent = if marker.chars().any(is_thai) { shaped_width(t, &marker, false) } else { latin_width(t, &marker) };
+        // At least one em of text beside the marker, however narrow the box.
+        let body = (width - indent).max(t.size);
+        for (i, (text, rtl)) in wrap_paragraph(t, para, body).into_iter().enumerate() {
+            out.push(if i == 0 { WrappedLine { text: format!("{marker}{text}"), rtl, indent: 0.0, para: index } } else { WrappedLine { text, rtl, indent, para: index } });
+        }
+    }
+    out
+}
+
+/// One paragraph (no `\n`) wrapped to `width`, each line with whether the paragraph runs right to left.
+fn wrap_paragraph(t: &AddedText, para: &str, width: f64) -> Vec<(String, bool)> {
+    let mut out = Vec::new();
+    {
         // Arabic or Hebrew: laid out with the bidirectional algorithm and shaped.
         let rtl_script = para.chars().any(|c| is_arabic(c) || is_hebrew(c));
         let thai = para.chars().any(is_thai);
@@ -43,8 +93,8 @@ pub(super) fn wrapped(t: &AddedText) -> Vec<(String, bool, usize)> {
             && !rtl_script
             && let Ok(lines) = thai_lines(t, para, width)
         {
-            out.extend(lines.into_iter().map(|line| (line, false, index)));
-            continue;
+            out.extend(lines.into_iter().map(|line| (line, false)));
+            return out;
         }
         let rtl = rtl_script && unicode_bidi::get_base_direction(para) == unicode_bidi::Direction::Rtl;
         // Arabic words are shaped one by one (joining stops at spaces), so a line's width is the
@@ -61,7 +111,7 @@ pub(super) fn wrapped(t: &AddedText) -> Vec<(String, bool, usize)> {
             let word_w = measure(word);
             let candidate_w = if line.is_empty() { word_w } else { line_w + space + word_w };
             if !line.is_empty() && candidate_w > width {
-                out.push((std::mem::take(&mut line), rtl, index));
+                out.push((std::mem::take(&mut line), rtl));
                 line.push_str(word);
                 line_w = word_w;
             } else {
@@ -72,7 +122,7 @@ pub(super) fn wrapped(t: &AddedText) -> Vec<(String, bool, usize)> {
                 line_w = candidate_w;
             }
         }
-        out.push((line, rtl, index));
+        out.push((line, rtl));
     }
     out
 }
@@ -194,6 +244,10 @@ pub(super) fn is_hebrew(c: char) -> bool {
 /// draw (or that has no face to draw it). Page-content tools refuse such text; the Add-text editor
 /// keeps it open.
 pub fn first_undrawable(t: &AddedText) -> Option<char> {
+    if has_thai(t) && !t.text.chars().any(is_thai) && pdfcraft_fonts::document_thai_font().is_none() {
+        // A Thai list on Latin text: its markers need the Thai face.
+        return t.list.marker(1).and_then(|m| m.chars().find(|c| is_thai(*c)));
+    }
     if t.text.chars().any(is_thai) {
         if let Some(c) = t.text.chars().find(|c| is_thai(*c) && !pdfcraft_fonts::thai_has(*c)) {
             return Some(c);
@@ -408,9 +462,21 @@ fn copy_key(c: &Content) -> Content {
     }
 }
 
-/// The widest explicit line before wrapping, measured with the PDF writing fonts.
+/// The widest explicit line before wrapping (with its list marker), measured with the PDF writing fonts.
 pub fn text_width(t: &AddedText) -> f64 {
-    t.text.split('\n').map(|line| shaped_width(t, line, unicode_bidi::get_base_direction(line) == unicode_bidi::Direction::Rtl)).fold(0.0, f64::max)
+    t.text
+        .split('\n')
+        .zip(list_markers(t))
+        .map(|(line, marker)| {
+            let line = format!("{}{line}", marker.unwrap_or_default());
+            shaped_width(t, &line, unicode_bidi::get_base_direction(line.as_str()) == unicode_bidi::Direction::Rtl)
+        })
+        .fold(0.0, f64::max)
+}
+
+/// diw edit: whether `t` draws Thai: in its text, or in its list's markers (๑. or ก.).
+pub(super) fn has_thai(t: &AddedText) -> bool {
+    t.text.chars().any(is_thai) || matches!(t.list, super::types::ListStyle::ThaiDecimal | super::types::ListStyle::ThaiLetter)
 }
 
 #[cfg(test)]

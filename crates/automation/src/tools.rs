@@ -821,7 +821,7 @@ pub fn tools() -> Vec<ToolDef> {
         t(
             "page_add_text",
             "Add text to a page",
-            "Add text as page content (not a comment). Place it with at [x, y] (top-left, points from the top-left of the displayed page) and width (wrap width, default 200), or rect. Newlines start new lines; long lines wrap. Style: font helvetica/times/courier, size, bold, italic, color (#RRGGBB or a name, painted in RGB) or, for print, gray (0 black to 1 white, painted in DeviceGray) or cmyk ([c, m, y, k], each 0 to 1, painted in DeviceCMYK; [0, 0, 0, 1] is 100 K black), one of the three, align left/center/right, char_spacing (points after each character), background (a colour filled behind the text, or none). Text must be Western European (WinAnsi) characters, or Arabic, Hebrew or Thai when the build has their craft-fonts faces (drawn right to left where the text is); others are refused. It stays editable with content_update. Undoable.",
+            "Add text as page content (not a comment). Place it with at [x, y] (top-left, points from the top-left of the displayed page) and width (wrap width, default 200), or rect. Newlines start new lines; long lines wrap. Style: font helvetica/times/courier, size, bold, italic, color (#RRGGBB or a name, painted in RGB) or, for print, gray (0 black to 1 white, painted in DeviceGray) or cmyk ([c, m, y, k], each 0 to 1, painted in DeviceCMYK; [0, 0, 0, 1] is 100 K black), one of the three, align left/center/right, char_spacing (points after each character), background (a colour filled behind the text, or none), list (bullet, dash, decimal, thai-decimal, thai-letter, lower-alpha, upper-alpha, lower-roman, upper-roman: one item per paragraph, wrapped lines indented). Text must be Western European (WinAnsi) characters, or Arabic, Hebrew or Thai when the build has their craft-fonts faces (drawn right to left where the text is); others are refused. It stays editable with content_update. Undoable.",
         )
         .cmd("edit.text")
         .with(schema(
@@ -838,6 +838,7 @@ pub fn tools() -> Vec<ToolDef> {
                 "aligns": { "type": "array", "maxItems": 4096, "items": { "type": "string", "enum": ["left", "center", "right", "justify", "inherit"] }, "description": "Each paragraph's (line's) own alignment, by index; inherit (or legacy null) follows align." },
                 "char_spacing": { "type": "number", "minimum": -500, "maximum": 500, "description": "Points after each character." },
                 "background": { "type": "string", "description": "A colour (#RRGGBB or a name) filled behind the text, or none." },
+                "list": { "type": "string", "enum": ["none", "bullet", "dash", "decimal", "thai-decimal", "thai-letter", "lower-alpha", "upper-alpha", "lower-roman", "upper-roman"], "description": "Start each paragraph with a bullet, dash or number; wrapped lines indent past it." },
             }),
             &["doc", "page", "text"],
         )),
@@ -851,7 +852,7 @@ pub fn tools() -> Vec<ToolDef> {
             json!({ "doc": doc(), "page": { "type": "integer", "minimum": 1 }, "path": { "type": "string" }, "rect": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 } }),
             &["doc", "page", "path"],
         )),
-        t("content_update", "Edit added content", "Move/resize (rect), retype (text) or restyle (font, size, bold, italic, color or gray or cmyk as page_add_text takes them, align, char_spacing in points, background colour or none) an added item (page, index from content_list). Images: rotate (degrees, multiple of 90, counter-clockwise), flip_h / flip_v (toggle), crop [left, bottom, right, top] as fractions trimmed, image (a file that replaces the picture). Undoable.")
+        t("content_update", "Edit added content", "Move/resize (rect), retype (text) or restyle (font, size, bold, italic, color or gray or cmyk as page_add_text takes them, align, char_spacing in points, background colour or none, list) an added item (page, index from content_list). Images: rotate (degrees, multiple of 90, counter-clockwise), flip_h / flip_v (toggle), crop [left, bottom, right, top] as fractions trimmed, image (a file that replaces the picture). Undoable.")
             .with(schema(
                 json!({
                     "doc": doc(), "page": { "type": "integer", "minimum": 1 }, "index": { "type": "integer", "minimum": 1 },
@@ -864,6 +865,7 @@ pub fn tools() -> Vec<ToolDef> {
                     "aligns": { "type": "array", "maxItems": 4096, "items": { "type": "string", "enum": ["left", "center", "right", "justify", "inherit"] }, "description": "Each paragraph's (line's) own alignment, by index; inherit (or legacy null) follows align." },
                     "char_spacing": { "type": "number", "minimum": -500, "maximum": 500, "description": "Points after each character." },
                     "background": { "type": "string", "description": "A colour (#RRGGBB or a name) filled behind the text, or none to remove it." },
+                    "list": { "type": "string", "enum": ["none", "bullet", "dash", "decimal", "thai-decimal", "thai-letter", "lower-alpha", "upper-alpha", "lower-roman", "upper-roman"], "description": "Start each paragraph with a bullet, dash or number; wrapped lines indent past it." },
                     "rotate": { "type": "integer" }, "flip_h": { "type": "boolean" }, "flip_v": { "type": "boolean" },
                     "crop": { "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 0.95 }, "minItems": 4, "maxItems": 4, "description": "Fractions trimmed: left, bottom, right, top. Left and right together, and bottom and top together, trim at most 0.95." },
                     "image": { "type": "string", "description": "Replace the picture with this file." },
@@ -887,6 +889,12 @@ pub fn tools() -> Vec<ToolDef> {
         t("content_delete", "Delete added content", "Delete an added item (page, index from content_list). Undoable.")
             .destructive()
             .with(schema(json!({ "doc": doc(), "page": { "type": "integer", "minimum": 1 }, "index": { "type": "integer", "minimum": 1 } }), &["doc", "page", "index"])),
+        t("content_arrange", "Arrange added content", "Bring added items (page, indices or index from content_list) to the front or forward, or send them backward or to the back, among the page's added items (the page's own content stays behind them). Items keep their order among themselves; the rest of their groups come with them. Indexes change: list again after. Undoable.")
+            .with(schema(json!({ "doc": doc(), "page": { "type": "integer", "minimum": 1 }, "indices": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1, "maxItems": 1000 }, "index": { "type": "integer", "minimum": 1 }, "layer": { "type": "string", "enum": ["front", "forward", "backward", "back"] } }), &["doc", "page", "layer"])),
+        t("content_group", "Group added content", "Group added items (page, indices from content_list: two or more, with any groups they are in) so they are selected, moved, copied, arranged and aligned together; or ungroup them (ungroup: true). content_list reports each item's group. Undoable.")
+            .with(schema(json!({ "doc": doc(), "page": { "type": "integer", "minimum": 1 }, "indices": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1, "maxItems": 1000 }, "index": { "type": "integer", "minimum": 1 }, "ungroup": { "type": "boolean" } }), &["doc", "page"])),
+        t("content_align", "Align added content", "Align added items (page, indices from content_list) left, center, right, top, middle or bottom with each other, or distribute three or more evenly (distribute-h, distribute-v). A group moves as one unit; one item (or group) lines up with the page. Undoable as one step.")
+            .with(schema(json!({ "doc": doc(), "page": { "type": "integer", "minimum": 1 }, "indices": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1, "maxItems": 1000 }, "index": { "type": "integer", "minimum": 1 }, "how": { "type": "string", "enum": ["left", "center", "right", "top", "middle", "bottom", "distribute-h", "distribute-v"] } }), &["doc", "page", "how"])),
         t("link_list", "List links", "Every link: page, 1-based index (for link_edit/link_delete), rect (points from the top-left of the page), and where it goes (url, or to_page with its zoom). A relative url also has resolved_url, the address resolved against the document's base URI (catalog /URI /Base); a link active only in its /QuadPoints has active_areas, one rect per quadrilateral. With text_links: true, also the web and email addresses written as plain page text with no link over them, which the viewer opens on a click: page, rects (one per line), url, and blocked (why it won't open) when the link check refuses it. Only http, https and mailto addresses are found. At most 100 pages are read per call, from text_links_from (default 1); text_links_next_page then gives the page to continue from.")
             .ro()
             .with(schema(json!({ "doc": doc(), "text_links": { "type": "boolean" }, "text_links_from": { "type": "integer", "minimum": 1 } }), &["doc"])),

@@ -72,10 +72,38 @@ impl PdfCraftApp {
             || ctx.input_mut(|input| input.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::X)));
         let paste = ctx.input_mut(|input| input.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::V)));
 
+        // diw edit: added content selected, and no text, takes ⌘C: Copy keeps its groups. A
+        // selection holding the PDF's own text or images is left to the objects' copy below.
+        let text_any = self.views.get(i).is_some_and(|v| v.selection_waits_for_text().is_some() || v.selected_text().is_some_and(|t| !t.is_empty()));
+        let content_copy = copy
+            && !text_any
+            && self.views.get(i).is_some_and(|v| {
+                crate::content_arrange_ui::selected_added(v).is_some()
+                    && v.objects.selection().is_none_or(|(_, targets)| targets.iter().all(|o| o.kind == pdfcraft_engine::ObjectKind::Added))
+            });
+        if content_copy {
+            if let Some(v) = self.views.get_mut(i) {
+                v.content_action = Some(crate::content_arrange_ui::ContentAction::Copy);
+            }
+            self.content_actions(ctx);
+            // The newest copy is what ⌘V pastes.
+            self.object_clipboard = None;
+            return;
+        }
+        // diw edit: ⌘V while what Copy put on the clipboard is still there pastes that content.
+        let content_paste = (paste || !pastes.is_empty())
+            && !self.content_clip.is_empty()
+            && pastes.iter().all(|p| matches!(p, ClipboardPaste::Text(text) if self.content_clip.holds_text(text)));
+        if content_paste {
+            self.run_content_action(i, crate::content_arrange_ui::ContentAction::Paste, ctx);
+            return;
+        }
         // Objects selected together in Edit a PDF take ⌘C and ⌘X.
         let objects = (copy || cut) && self.quick_tool == QuickTool::EditText && self.views.get(i).is_some_and(|v| v.objects.count() > 0);
         if objects {
             self.copy_objects(i, ctx, cut);
+            // diw edit: the newest copy is what ⌘V pastes.
+            self.content_clip = Default::default();
         }
         // A selection across pages still being read has no text yet, but is selected all the
         // same: ⌘C starts its copy rather than copying the selected comments.

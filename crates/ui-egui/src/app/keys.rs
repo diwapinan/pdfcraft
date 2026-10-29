@@ -43,6 +43,18 @@ impl PdfCraftApp {
         // full-screen and update prompts, or the OCR Verify screen in their place (a dialog has
         // returned above, and the palette holds the keyboard).
         let page_chords = !self.covers_pages();
+        // diw edit: what the Arrange panel or the page menu asked for last frame, then the
+        // arrange and group keys of selected added content, before the commands sharing them (⌘D).
+        self.content_actions(ctx);
+        if page_chords
+            && let Some(i) = self.active
+            && self.dialog.is_none()
+            && !self.palette_open
+            && let Some(view) = self.views.get_mut(i)
+        {
+            content_arrange_ui::keys(ctx, view);
+        }
+        self.content_actions(ctx);
         if chords {
             self.registry_shortcuts(ctx);
         }
