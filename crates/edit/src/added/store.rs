@@ -59,6 +59,11 @@ fn parse(doc: &Document, d: &Dict) -> Option<Content> {
                 aligns: crate::paragraph_align::tidy(aligns, align),
                 // Items written before character spacing have none.
                 char_spacing: d.get(b"CharSpacing").and_then(Object::as_f64).filter(|v| v.is_finite()).unwrap_or(0.0),
+                // Items written before backgrounds, or with a malformed one, have none.
+                background: <[f64; 3]>::try_from(nums(doc, d.get(b"Background")))
+                    .ok()
+                    .filter(|c| c.iter().all(|v| v.is_finite()))
+                    .map(|c| c.map(|v| v.clamp(0.0, 1.0))),
             };
             // An ink whose look isn't the stored colour (a file edited by hand) is none.
             t.drop_stale_ink();
@@ -175,6 +180,9 @@ fn validate(c: &Content) -> Result<(), EditError> {
             }
             if t.ink.is_some_and(|i| !i.valid()) {
                 return Err(EditError::Invalid("a gray level and each CMYK value must be from 0 to 1".into()));
+            }
+            if t.background.is_some_and(|c| !c.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v))) {
+                return Err(EditError::Invalid("the background colour must have components between 0 and 1".into()));
             }
             if (r[2] - r[0]).abs() < 1.0 {
                 return Err(EditError::Invalid("the text box is too narrow".into()));

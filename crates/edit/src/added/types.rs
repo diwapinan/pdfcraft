@@ -168,9 +168,23 @@ pub struct AddedText {
     /// Paragraphs (lines typed with Enter) aligned other than [`AddedText::align`], by index;
     /// `None` and paragraphs past the end follow `align` ([`crate::paragraph_align`]).
     pub aligns: Vec<Option<Align>>,
+    /// A colour filled behind the text, over the text box (see [`AddedText::background_rect`]);
+    /// `None` leaves the page showing through.
+    pub background: Option<[f64; 3]>,
 }
 
 impl AddedText {
+    /// Space between the text and the edge of its background, as a fraction of the font size.
+    pub const BACKGROUND_PAD: f64 = 0.2;
+
+    /// The box the background fills, in display space: the text box grown by
+    /// [`AddedText::BACKGROUND_PAD`] on every side, so letters don't touch its edge.
+    pub fn background_rect(&self) -> [f64; 4] {
+        let [x0, y0, x1, y1] = super::layout::text_rect(self);
+        let pad = if self.size.is_finite() { self.size.max(0.0) * Self::BACKGROUND_PAD } else { 0.0 };
+        [x0 - pad, y0 - pad, x1 + pad, y1 + pad]
+    }
+
     /// Paragraph `i`'s alignment.
     pub fn paragraph_align(&self, i: usize) -> Align {
         crate::paragraph_align::align_of(&self.aligns, i, self.align)
@@ -229,6 +243,7 @@ impl Default for AddedText {
             align: Align::Left,
             aligns: Vec::new(),
             char_spacing: 0.0,
+            background: None,
         }
     }
 }

@@ -746,8 +746,14 @@ pub(crate) fn editor(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, in
             if let Some(source_rect) = source_rect.filter(|_| !background_ready) {
                 ui.painter().rect_filled(source_rect.union(r).expand(1.0), CornerRadius::ZERO, Color32::WHITE);
             }
-            // The box is white in every theme, so the caret must not follow the theme (pale in dark mode) (#655).
-            ui.visuals_mut().text_cursor.stroke.color = crate::edit_text_ui::caret_color_on(Color32::WHITE);
+            // The text's own background shows while typing, as the page will draw it.
+            let background = t.style.background.map(|c| {
+                let [r, g, b] = c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+                Color32::from_rgb(r, g, b)
+            });
+            // The box is white in every theme (or the text's background), so the caret must not
+            // follow the theme (pale in dark mode) (#655).
+            ui.visuals_mut().text_cursor.stroke.color = crate::edit_text_ui::caret_color_on(background.unwrap_or(Color32::WHITE));
             let [cr, cg, cb] = t.style.color.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
             let color = Color32::from_rgb(cr, cg, cb);
             // Character spacing shows as the page will draw it, scaled like the font.
@@ -772,7 +778,7 @@ pub(crate) fn editor(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, in
                     // Keep the page editor's original inset; the theme's larger button padding
                     // otherwise shifts narrow right-aligned boxes away from their text edge.
                     .margin(egui::Margin::symmetric(4, 2))
-                    .background_color(if background_ready { Color32::TRANSPARENT } else { Color32::WHITE })
+                    .background_color(background.unwrap_or(if background_ready { Color32::TRANSPARENT } else { Color32::WHITE }))
                     .text_color(color)
                     .hint_text(tl!("Type text"))
                     .id(input)
