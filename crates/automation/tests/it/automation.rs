@@ -4668,6 +4668,53 @@ fn added_text_takes_a_background() {
     assert_eq!(list(&mut a), Value::Null);
 }
 
+/// diw edit: lists, arrange, groups and align through the tools, each one undoable.
+#[test]
+fn added_content_lists_arrange_group_and_align() {
+    let dir = workdir("content-arrange");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let items = |a: &mut Automation| ok(a, "content_list", json!({ "doc": doc }))["items"].as_array().unwrap().clone();
+    let texts = |a: &mut Automation| items(a).iter().map(|i| i["text"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>();
+    ok(&mut a, "page_add_text", json!({ "doc": doc, "page": 1, "text": "A\nB", "at": [20, 20], "list": "decimal" }));
+    ok(&mut a, "page_add_text", json!({ "doc": doc, "page": 1, "text": "C", "at": [60, 80] }));
+    ok(&mut a, "page_add_text", json!({ "doc": doc, "page": 1, "text": "D", "at": [100, 140] }));
+    assert_eq!(items(&mut a)[0]["list"], "decimal");
+    let bad = json!({ "doc": doc, "page": 1, "index": 1, "list": "stars" });
+    assert!(matches!(a.call("content_update", &bad), Err(ToolError::InvalidArgs(_))));
+
+    ok(&mut a, "content_arrange", json!({ "doc": doc, "page": 1, "index": 1, "layer": "front" }));
+    assert_eq!(texts(&mut a), ["C", "D", "A\nB"]);
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert_eq!(texts(&mut a), ["A\nB", "C", "D"], "arranging is one undo step");
+    assert!(
+        matches!(a.call("content_arrange", &json!({ "doc": doc, "page": 1, "index": 3, "layer": "front" })), Err(ToolError::Failed(_))),
+        "already in front"
+    );
+
+    let grouped = ok(&mut a, "content_group", json!({ "doc": doc, "page": 1, "indices": [2, 3] }));
+    let g = grouped["group"].as_u64().unwrap();
+    assert_eq!(items(&mut a).iter().map(|i| i["group"].as_u64()).collect::<Vec<_>>(), [None, Some(g), Some(g)]);
+    // Sending one member back takes its group with it.
+    ok(&mut a, "content_arrange", json!({ "doc": doc, "page": 1, "index": 3, "layer": "back" }));
+    assert_eq!(texts(&mut a), ["C", "D", "A\nB"]);
+
+    // Aligning left: the group moves as one unit with the other item.
+    ok(&mut a, "content_align", json!({ "doc": doc, "page": 1, "indices": [1, 3], "how": "left" }));
+    let left = |i: &Value| i["rect"][0].as_f64().unwrap();
+    let after = items(&mut a);
+    assert_eq!((left(&after[0]), left(&after[1]), left(&after[2])), (20.0, 60.0, 20.0), "C lines up with A; D keeps its place in the group");
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert_eq!(left(&items(&mut a)[0]), 60.0, "aligning is one undo step");
+    assert!(
+        matches!(a.call("content_align", &json!({ "doc": doc, "page": 1, "indices": [1, 3], "how": "distribute-h" })), Err(ToolError::Failed(_))),
+        "two units can't be distributed"
+    );
+
+    ok(&mut a, "content_group", json!({ "doc": doc, "page": 1, "index": 1, "ungroup": true }));
+    assert!(items(&mut a).iter().all(|i| i["group"].is_null()), "ungrouping one member ungroups the whole group");
+}
+
 fn added_rotation_image(dir: &Path) {
     let mut png = Vec::new();
     let mut enc = png::Encoder::new(&mut png, 2, 1);

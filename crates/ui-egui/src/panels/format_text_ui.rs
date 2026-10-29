@@ -147,8 +147,44 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, look: &mut AddedText, extras:
         });
         let (sep, _) = ui.allocate_exact_size(vec2(9.0, 26.0), Sense::hover());
         ui.painter().vline(sep.center().x, sep.y_range().shrink(3.0), Stroke::new(1.0, t.divider));
-        planned(ui, "list", tl!("Bulleted list"));
-        planned(ui, "list-ordered", tl!("Numbered list"));
+        // diw edit: added text has lists of its own; a paragraph of the PDF's own text doesn't yet.
+        if extras.is_none() {
+            use pdfcraft_engine::ListStyle as L;
+            let lists: [(&str, &str, &[L]); 2] = [
+                ("list", tl!("Bulleted list"), &[L::None, L::Bullet, L::Dash]),
+                (
+                    "list-ordered",
+                    tl!("Numbered list"),
+                    &[L::None, L::Decimal, L::ThaiDecimal, L::ThaiLetter, L::LowerAlpha, L::UpperAlpha, L::LowerRoman, L::UpperRoman],
+                ),
+            ];
+            for (icon, tip, styles) in lists {
+                let on = look.list != L::None && styles.contains(&look.list);
+                let button = icons::button(ui, icon, 30.0, on, tip);
+                let button = flyout(ui, t, button);
+                egui::Popup::menu(&button).show(|ui| {
+                    for &style in styles {
+                        // The Thai markers are shown as they look only when the interface's fonts
+                        // can draw them (installed system fonts may be off); else they are named.
+                        let sample = style.sample();
+                        let drawable = ui.fonts_mut(|f| f.has_glyphs(&egui::FontId::proportional(13.0), sample));
+                        let shown = match style {
+                            L::None => tl!("No list").to_string(),
+                            L::ThaiDecimal if !drawable => tl!("Thai numerals (1. 2. 3.)").to_string(),
+                            L::ThaiLetter if !drawable => tl!("Thai letters (ko, kho, kho)").to_string(),
+                            _ => sample.to_string(),
+                        };
+                        if ui.selectable_label(look.list == style, shown).clicked() {
+                            look.list = style;
+                            ui.close();
+                        }
+                    }
+                });
+            }
+        } else {
+            planned(ui, "list", tl!("Bulleted list"));
+            planned(ui, "list-ordered", tl!("Numbered list"));
+        }
         let current = match look.align {
             TextAlign::Left => "align-left",
             TextAlign::Center => "align-center",

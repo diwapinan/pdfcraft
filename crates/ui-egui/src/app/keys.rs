@@ -34,6 +34,17 @@ impl PdfCraftApp {
         // The in-window menu bar holds the keys while one of its menus is open or it has the
         // keyboard (Alt, F10); a command shortcut leaves it and runs.
         craft_menu::bar::leave_for_shortcut(ctx);
+        // diw edit: what the Arrange panel or the page menu asked for last frame, then the
+        // arrange and group keys of selected added content, before the commands sharing them (⌘D).
+        self.content_actions(ctx);
+        if let Some(i) = self.active
+            && self.dialog.is_none()
+            && !self.palette_open
+            && let Some(view) = self.views.get_mut(i)
+        {
+            content_arrange_ui::keys(ctx, view);
+        }
+        self.content_actions(ctx);
         if !craft_menu::bar::is_open(ctx) && !craft_menu::bar::is_focused(ctx) {
             self.registry_shortcuts(ctx);
         }
@@ -74,8 +85,24 @@ impl PdfCraftApp {
                 prepare::nudge_keys(ctx, &mut self.views[i], doc);
             }
             canvas::shortcuts(&mut self.views[i], ctx, self.scroll_speed);
-            self.copy_key(i, ctx);
-            self.paste_image_key(i, ctx, pasted);
+            // diw edit: ⌘C with added content selected (and no text) copies the content.
+            let copy = ctx.input(|input| input.events.iter().any(|e| matches!(e, egui::Event::Copy)));
+            let text_selected = self.views.get(i).and_then(|v| v.selected_text()).is_some_and(|t| !t.is_empty());
+            if copy
+                && !text_selected
+                && !ctx.egui_wants_keyboard_input()
+                && self.views.get(i).is_some_and(|v| content_arrange_ui::selected_added(v).is_some())
+            {
+                if let Some(v) = self.views.get_mut(i) {
+                    v.content_action = Some(content_arrange_ui::ContentAction::Copy);
+                }
+                self.content_actions(ctx);
+            } else {
+                self.copy_key(i, ctx);
+            }
+            if !self.paste_content_key(i, ctx, pasted) {
+                self.paste_image_key(i, ctx, pasted);
+            }
             self.image_pick_keys(i, ctx);
         }
     }

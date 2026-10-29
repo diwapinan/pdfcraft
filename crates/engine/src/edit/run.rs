@@ -94,6 +94,8 @@ pub(crate) fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Re
         | Edit::DeleteContent { .. }
         | Edit::ReplaceImage { .. }
         | Edit::PasteContent { .. }
+        | Edit::ArrangeContent { .. }
+        | Edit::GroupContent { .. }
         | Edit::ClearRedactions
         | Edit::RemoveHidden { .. }
         | Edit::ImportData { .. }
@@ -611,6 +613,20 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
                 }
             };
             pdfcraft_edit::add_content(doc, *page, &content)?;
+        }
+        Edit::ArrangeContent { page, indices, layer } => {
+            pdfcraft_edit::arrange_content(doc, *page, indices, *layer)?;
+        }
+        Edit::GroupContent { page, indices, group } => {
+            let group = if *group {
+                if indices.len() < 2 {
+                    return Err(EditError::Edit(pdfcraft_edit::EditError::Invalid("select two or more items to group".into())));
+                }
+                Some(pdfcraft_edit::new_content_group(doc, *page))
+            } else {
+                None
+            };
+            pdfcraft_edit::set_content_group(doc, *page, indices, group)?;
         }
         Edit::ApplyRedactions { pages } => {
             cx.redaction_overlays = pdfcraft_redact::apply(doc, pages.as_deref())?.overlays;

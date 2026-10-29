@@ -728,9 +728,20 @@ fn format_text_panel_sets_alignment_and_lists_planned_controls_disabled() {
     assert!(h.state_mut().execute("edit.text"));
     h.run_steps(3);
     h.get_by_label("FORMAT TEXT");
-    for planned in ["Bulleted list", "Numbered list", "Superscript", "Subscript"] {
+    for planned in ["Superscript", "Subscript"] {
         assert!(h.get_by_label(planned).accesskit_node().is_disabled(), "{planned} is shown but disabled");
     }
+    // diw edit: added text has lists; picking one styles the next text added.
+    for list in ["Bulleted list", "Numbered list"] {
+        assert!(!h.get_by_label(list).accesskit_node().is_disabled(), "{list} works for added text");
+    }
+    h.get_by_label("Numbered list").click();
+    h.run_steps(2);
+    // Named in English where the test's fonts have no Thai.
+    let thai = if h.query_by_label("๑.  ๒.  ๓.").is_some() { "๑.  ๒.  ๓." } else { "Thai numerals (1. 2. 3.)" };
+    h.get_by_label(thai).click();
+    h.run_steps(2);
+    assert_eq!(h.state().text_style.list, pdfcraft_engine::ListStyle::ThaiDecimal);
     h.get_by_label("Alignment").click();
     h.run_steps(2);
     h.get_by_label("Centre").click();

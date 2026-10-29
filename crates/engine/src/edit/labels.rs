@@ -128,6 +128,12 @@ pub const EDIT_LABELS: &[&str] = &[
     "Edit content",
     "Delete content",
     "Paste",
+    "Bring to Front",
+    "Bring Forward",
+    "Send Backward",
+    "Send to Back",
+    "Group",
+    "Ungroup",
     "Apply redactions",
     "Remove redaction marks",
     "Remove hidden information",
@@ -150,8 +156,17 @@ pub const EDIT_LABELS: &[&str] = &[
 /// The names of the batches built below L7, which an interface shows in the same places as
 /// [`EDIT_LABELS`] and so translates the same way. A batch built in the interface itself arrives
 /// already worded in the interface's language.
-pub const BATCH_LABELS: &[&str] =
-    &["Set document title", "Mark differences", "Detect form fields", "Run JavaScript", "Recognize text", field_table::LABEL, "Style"];
+pub const BATCH_LABELS: &[&str] = &[
+    "Set document title",
+    "Mark differences",
+    "Detect form fields",
+    "Run JavaScript",
+    "Recognize text",
+    field_table::LABEL,
+    "Style",
+    "Align",
+    "Distribute",
+];
 
 impl Edit {
     /// Label for the Edit menu and history ("Undo Rotate pages").
@@ -273,6 +288,13 @@ impl Edit {
             Edit::DeleteContent { .. } => Label::of("Delete content"),
             Edit::ReplaceImage { .. } => Label::of("Replace image"),
             Edit::PasteContent { .. } => Label::of("Paste"),
+            Edit::ArrangeContent { layer, .. } => Label::of(match layer {
+                pdfcraft_edit::Layer::Front => "Bring to Front",
+                pdfcraft_edit::Layer::Forward => "Bring Forward",
+                pdfcraft_edit::Layer::Backward => "Send Backward",
+                pdfcraft_edit::Layer::Back => "Send to Back",
+            }),
+            Edit::GroupContent { group, .. } => Label::of(if *group { "Group" } else { "Ungroup" }),
             Edit::ApplyRedactions { .. } => Label::of("Apply redactions"),
             Edit::ClearRedactions => Label::of("Remove redaction marks"),
             Edit::RemoveHidden { .. } => Label::of("Remove hidden information"),

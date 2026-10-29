@@ -55,6 +55,12 @@ pub(super) fn edit_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, g
     // Format text at the top while text is selected or being added.
     format_section(app, ui, t);
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        // diw edit: Arrange (layer, align, group, copy and paste) for selected added content.
+        if let Some((i, id)) = app.active_ids() {
+            let can_modify = app.session.get(id).is_some_and(pdfcraft_engine::Document::allows_modification);
+            let can_paste = !app.content_clip.is_empty();
+            crate::content_arrange_ui::panel(ui, &mut app.views[i], can_modify, can_paste);
+        }
         widgets::section_title(ui, tl!("Modify page"));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;

@@ -483,6 +483,19 @@ pub enum Edit {
         content: AddedContent,
         file: Option<(String, Arc<Vec<u8>>)>,
     },
+    /// diw edit: Arrange ▸ Bring to Front, Bring Forward, Send Backward or Send to Back for added
+    /// items `indices` of `page`, among the page's added items.
+    ArrangeContent {
+        page: usize,
+        indices: Vec<usize>,
+        layer: pdfcraft_edit::Layer,
+    },
+    /// diw edit: Group added items `indices` of `page` (in a new group), or Ungroup them.
+    GroupContent {
+        page: usize,
+        indices: Vec<usize>,
+        group: bool,
+    },
     /// Apply redaction marks (all, or those on `pages`): remove what they cover for good.
     ApplyRedactions {
         pages: Option<Vec<usize>>,

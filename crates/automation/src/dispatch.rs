@@ -650,6 +650,9 @@ impl Automation {
             "content_update" => self.content_update(&a)?,
             "content_delete" => self.content_delete(&a)?,
             "content_copy" => self.content_copy(&a)?,
+            "content_arrange" => self.content_arrange(&a)?,
+            "content_group" => self.content_group(&a)?,
+            "content_align" => self.content_align(&a)?,
             "doc_print" => self.doc_print(&a)?,
             "attachment_add" => {
                 let path = self.resolve(a.str("path")?, false)?;

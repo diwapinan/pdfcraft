@@ -404,6 +404,8 @@ impl Session {
                     | Edit::DeleteContent { .. }
                     | Edit::ReplaceImage { .. }
                     | Edit::PasteContent { .. }
+                    | Edit::ArrangeContent { .. }
+                    | Edit::GroupContent { .. }
             ) || matches!(e, Edit::MoveObjects { objects, .. } if objects.iter().any(|o| o.kind == ObjectKind::Added))
         });
         let touches_marks = edit.is_none_or(|e| {

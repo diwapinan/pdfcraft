@@ -18,11 +18,13 @@ use unicode_bidi::{Level, ParagraphBidiInfo};
 
 use crate::{EditError, MarkKind, check, contents, matrix_number, n, page_list, place_tagged};
 
+mod arrange;
 mod draw;
 mod layout;
 mod store;
 mod types;
 
+pub use arrange::{AlignBoxes, align_offsets, offset_rect};
 #[cfg(test)]
 use draw::{GLYPHS_PER_FONT, LaidLine, draw_laid_shaped};
 #[cfg(test)]
@@ -30,8 +32,11 @@ use layout::Piece;
 #[cfg(test)]
 pub(crate) use layout::WRAP_CALLS;
 pub use layout::{PASTE_STEP, first_undrawable, lines, paste_place, paste_rect, text_rect, text_width};
-pub use store::{add_content, delete_content, isolate_content, list_added, scan_markers, update_content};
-pub use types::{Added, AddedImage, AddedText, Align, CHAR_SPACING_LIMIT, Family, MarkerScan};
+pub use store::{
+    add_content, arrange_content, arranged_positions, delete_content, isolate_content, list_added, new_content_group, scan_markers,
+    set_content_group, update_content,
+};
+pub use types::{Added, AddedImage, AddedText, Align, CHAR_SPACING_LIMIT, Family, Layer, ListStyle, MarkerScan};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Content {

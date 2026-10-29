@@ -45,6 +45,45 @@ impl ObjectSelection {
         self.selected.len()
     }
 
+    /// diw edit: the page and the added items (indexes among the page's added items) the
+    /// selection holds, if it holds any.
+    pub(crate) fn added_selection(&self) -> Option<(usize, Vec<usize>)> {
+        let page = self.page?;
+        let added: Vec<usize> = self.selected.iter().filter(|o| o.target.kind == ObjectKind::Added).map(|o| o.target.index).collect();
+        (!added.is_empty()).then_some((page, added))
+    }
+
+    /// diw edit: add `objects` of the selected page to the selection (the rest of a group), and
+    /// drop the added items `drop` (indexes among the page's added items). Nothing changes during
+    /// a gesture or past the selection's limit.
+    pub(crate) fn regroup(&mut self, add: Vec<EditableObject>, drop: &[usize]) {
+        if self.gesture.is_some() || self.page.is_none() {
+            return;
+        }
+        self.selected.retain(|o| !(o.target.kind == ObjectKind::Added && drop.contains(&o.target.index)));
+        for object in add {
+            if self.selected.len() < MAX_MOVE_OBJECTS && !self.selected.iter().any(|o| o.target == object.target) {
+                self.selected.push(object);
+            }
+        }
+        if self.selected.is_empty() {
+            self.clear();
+        }
+    }
+
+    /// diw edit: select `objects` of `page` (a group, or what a paste put down), replacing the
+    /// selection. Nothing changes during a gesture.
+    pub(crate) fn select_objects(&mut self, page: usize, objects: Vec<EditableObject>) {
+        if self.gesture.is_some() {
+            return;
+        }
+        self.clear();
+        if !objects.is_empty() {
+            self.page = Some(page);
+            self.selected = objects;
+        }
+    }
+
     /// A preview belongs to the active, focused document. Returning from another tab or a
     /// modal must not turn a release that happened elsewhere into a document edit.
     pub fn set_input_blocked(&mut self, blocked: bool) {

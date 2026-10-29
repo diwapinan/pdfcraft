@@ -1,6 +1,6 @@
 use super::draw::{draw, params};
-use super::layout::{first_undrawable, is_thai, nums, shaped_arabic, thai_error};
-use super::types::{Added, AddedImage, AddedText, Align, CHAR_SPACING_LIMIT, Family, MarkerScan, TAG};
+use super::layout::{first_undrawable, has_thai, is_thai, nums, shaped_arabic, thai_error};
+use super::types::{Added, AddedImage, AddedText, Align, CHAR_SPACING_LIMIT, Family, Layer, ListStyle, MarkerScan, TAG};
 use super::{Content, Dict, Document, EditError, GlyphError, MarkKind, ObjRef, Object, Stream, check, contents, page_list, place_tagged};
 
 fn parse(doc: &Document, d: &Dict) -> Option<Content> {
@@ -31,6 +31,8 @@ fn parse(doc: &Document, d: &Dict) -> Option<Content> {
                     .ok()
                     .filter(|c| c.iter().all(|v| v.is_finite()))
                     .map(|c| c.map(|v| v.clamp(0.0, 1.0))),
+                // Items written before lists, or with a number this build doesn't know, are no list.
+                list: d.int(b"List").map_or(ListStyle::None, ListStyle::from_code),
             }))
         }
         b"Image" => {
@@ -109,13 +111,26 @@ pub fn scan_markers(doc: &Document) -> MarkerScan {
                             .and_then(Object::as_f64)
                             .filter(|u| u.is_finite() && *u >= 1.0)
                             .map_or(1.0, |u| u.min(pdfcraft_model::MAX_USER_UNIT));
-                        scan.added.push(Added { page: pi, obj, content: content.scaled(page.user_unit(doc) / written) });
+                        scan.added.push(Added { page: pi, obj, content: content.scaled(page.user_unit(doc) / written), group: group_of(params) });
                     }
                 });
             });
         });
     }
     scan
+}
+
+/// The group recorded in an item's parameters: a whole number from 1 up, else none.
+fn group_of(params: &Dict) -> Option<u32> {
+    params.int(b"Group").and_then(|g| u32::try_from(g).ok()).filter(|g| *g > 0)
+}
+
+/// The group recorded on the item whose stream is `obj`, if any.
+fn stream_group(doc: &Document, obj: ObjRef) -> Option<u32> {
+    match &*doc.get(obj) {
+        Object::Stream(s) => s.dict.get(b"PCAdded").map(|p| doc.resolve(p)).and_then(|p| p.as_dict().and_then(group_of)),
+        _ => None,
+    }
 }
 
 fn validate(c: &Content) -> Result<(), EditError> {
@@ -142,7 +157,7 @@ fn validate(c: &Content) -> Result<(), EditError> {
             if (r[2] - r[0]).abs() < 1.0 {
                 return Err(EditError::Invalid("the text box is too narrow".into()));
             }
-            if t.text.chars().any(is_thai) && pdfcraft_fonts::document_thai_font().is_none() {
+            if has_thai(t) && pdfcraft_fonts::document_thai_font().is_none() {
                 return Err(thai_error(GlyphError::NoFont, &t.text));
             }
             // Without the Arabic face, `draw` decides for the Arabic letters themselves (#403): a new
@@ -199,6 +214,10 @@ fn write(doc: &mut Document, page: usize, c: &Content, obj: Option<ObjRef>) -> R
     let mut sd = Dict::new();
     sd.set(b"PCMark".to_vec(), Object::name(TAG));
     let mut added = params(c);
+    // A replaced item stays in its group (moving, retyping or restyling it keeps it grouped).
+    if let Some(group) = obj.and_then(|r| stream_group(doc, r)) {
+        added.set(b"Group".to_vec(), Object::Int(i64::from(group)));
+    }
     if user_unit != 1.0 {
         added.set(b"UserUnit".to_vec(), Object::Real(user_unit));
     }
@@ -272,6 +291,126 @@ pub fn delete_content(doc: &mut Document, page: usize, index: usize) -> Result<(
         }
     })?;
     Ok(())
+}
+
+/// The added items of `page`, in drawing order, and the indexes asked for: in range, each once,
+/// in order. Refused when one is out of range or none is asked for.
+fn page_items(doc: &Document, page: usize, indices: &[usize]) -> Result<(Vec<Added>, Vec<usize>), EditError> {
+    let items: Vec<Added> = list_added(doc).into_iter().filter(|a| a.page == page).collect();
+    let mut wanted: Vec<usize> = indices.to_vec();
+    wanted.sort_unstable();
+    wanted.dedup();
+    if let Some(bad) = wanted.iter().find(|i| **i >= items.len()) {
+        return Err(EditError::Invalid(format!("page {} has no added item {}", page + 1, bad.saturating_add(1))));
+    }
+    if wanted.is_empty() {
+        return Err(EditError::Invalid("select added content first".into()));
+    }
+    Ok((items, wanted))
+}
+
+/// diw edit: put added items `indices` of `page` together in group `group`, or take them out of
+/// their groups (`None`). Only the items' recorded parameters change; nothing is redrawn.
+pub fn set_content_group(doc: &mut Document, page: usize, indices: &[usize], group: Option<u32>) -> Result<(), EditError> {
+    let (items, wanted) = page_items(doc, page, indices)?;
+    for index in wanted {
+        let Some(item) = items.get(index) else { continue };
+        let Object::Stream(mut stream) = (*doc.get(item.obj)).clone() else {
+            return Err(EditError::Invalid("an added item's content is missing".into()));
+        };
+        let mut params = stream.dict.get(b"PCAdded").map(|p| doc.resolve(p)).and_then(|p| p.as_dict().cloned()).unwrap_or_default();
+        match group {
+            Some(g) => params.set(b"Group".to_vec(), Object::Int(i64::from(g))),
+            None => {
+                params.remove(b"Group");
+            }
+        }
+        stream.dict.set(b"PCAdded".to_vec(), Object::Dict(params));
+        doc.set(item.obj, Object::Stream(stream));
+    }
+    Ok(())
+}
+
+/// diw edit: a group number no added item on `page` uses yet.
+pub fn new_content_group(doc: &Document, page: usize) -> u32 {
+    list_added(doc).iter().filter(|a| a.page == page).filter_map(|a| a.group).max().map_or(1, |g| g.saturating_add(1))
+}
+
+/// diw edit: Arrange ▸ Bring to Front, Bring Forward, Send Backward, Send to Back for added
+/// items `indices` of `page`, which keep their order among themselves. Only the order of the
+/// page's added items changes: the items trade the places in the page's content they hold, so
+/// each still draws from the clean graphics state it was written for, and the page's own content
+/// stays behind them. Returns the items' new indexes; refused when nothing would move.
+pub fn arrange_content(doc: &mut Document, page: usize, indices: &[usize], layer: Layer) -> Result<Vec<usize>, EditError> {
+    let (items, wanted) = page_items(doc, page, indices)?;
+    let n = items.len();
+    let order = arranged_order(n, &wanted, layer);
+    if order.iter().copied().eq(0..n) {
+        return Err(EditError::Invalid(
+            match layer {
+                Layer::Front | Layer::Forward => "the selection is already in front",
+                Layer::Back | Layer::Backward => "the selection is already at the back",
+            }
+            .into(),
+        ));
+    }
+    let p = page_list(doc).swap_remove(page);
+    let mut list = contents(doc, &p)?;
+    // The places the items hold in the page's content, in drawing order.
+    let slots: Vec<usize> = items.iter().filter_map(|a| list.iter().position(|o| o.as_ref() == Some(a.obj))).collect();
+    let distinct = slots.len() == n && list.iter().filter(|o| items.iter().any(|a| o.as_ref() == Some(a.obj))).count() == n;
+    if !distinct {
+        return Err(EditError::Invalid("this page's added content can't be reordered".into()));
+    }
+    for (slot, old) in slots.iter().zip(&order) {
+        let Some(item) = items.get(*old) else { continue };
+        if let Some(entry) = list.get_mut(*slot) {
+            *entry = Object::Ref(item.obj);
+        }
+    }
+    doc.update_dict(p.obj, |d| d.set(b"Contents".to_vec(), Object::Array(list)))?;
+    Ok(arranged_positions(n, &wanted, layer))
+}
+
+/// diw edit: the drawing order (as old indexes) that `layer` gives `n` added items when items
+/// `wanted` are chosen. Indexes out of range are ignored.
+fn arranged_order(n: usize, wanted: &[usize], layer: Layer) -> Vec<usize> {
+    let chosen: Vec<bool> = (0..n).map(|i| wanted.contains(&i)).collect();
+    let is = |i: usize| chosen.get(i).copied().unwrap_or(false);
+    let mut order: Vec<usize> = (0..n).collect();
+    match layer {
+        Layer::Front => order = (0..n).filter(|i| !is(*i)).chain((0..n).filter(|i| is(*i))).collect(),
+        Layer::Back => order = (0..n).filter(|i| is(*i)).chain((0..n).filter(|i| !is(*i))).collect(),
+        // Each chosen item passes the next item above it that isn't chosen; a run of chosen
+        // items moves as one.
+        Layer::Forward => {
+            for i in (0..n.saturating_sub(1)).rev() {
+                if let (Some(&a), Some(&b)) = (order.get(i), order.get(i + 1))
+                    && is(a)
+                    && !is(b)
+                {
+                    order.swap(i, i + 1);
+                }
+            }
+        }
+        Layer::Backward => {
+            for i in 1..n {
+                if let (Some(&a), Some(&b)) = (order.get(i), order.get(i - 1))
+                    && is(a)
+                    && !is(b)
+                {
+                    order.swap(i, i - 1);
+                }
+            }
+        }
+    }
+    order
+}
+
+/// diw edit: where the chosen items `wanted` of `n` added items are after [`arrange_content`]
+/// with `layer`: their new indexes, in drawing order. For an interface to keep them selected.
+pub fn arranged_positions(n: usize, wanted: &[usize], layer: Layer) -> Vec<usize> {
+    arranged_order(n, wanted, layer).iter().enumerate().filter(|(_, old)| wanted.contains(old)).map(|(new, _)| new).collect()
 }
 
 /// Leave only item `index` on `page`: its contents become the item's own stream and its

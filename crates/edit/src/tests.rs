@@ -958,6 +958,144 @@ fn combined_marker_scan_matches_the_independent_scans() {
 }
 
 #[test]
+fn list_markers_count_each_style() {
+    use crate::ListStyle as L;
+    let m = |s: L, n: usize| s.marker(n).unwrap_or_default();
+    assert_eq!((m(L::Bullet, 3), m(L::Dash, 3)), ("•".into(), "–".into()));
+    assert_eq!((m(L::Decimal, 12), m(L::ThaiDecimal, 12)), ("12.".into(), "๑๒.".into()));
+    assert_eq!(
+        (m(L::ThaiLetter, 1), m(L::ThaiLetter, 3), m(L::ThaiLetter, 4), m(L::ThaiLetter, 41), m(L::ThaiLetter, 42)),
+        ("ก.".into(), "ค.".into(), "ง.".into(), "ฮ.".into(), "กก.".into())
+    );
+    assert_eq!((m(L::LowerAlpha, 26), m(L::LowerAlpha, 27), m(L::UpperAlpha, 28)), ("z.".into(), "aa.".into(), "AB.".into()));
+    assert_eq!((m(L::LowerRoman, 4), m(L::LowerRoman, 1994), m(L::UpperRoman, 9)), ("iv.".into(), "mcmxciv.".into(), "IX.".into()));
+    assert_eq!(m(L::LowerRoman, 4000), "4000.", "past Roman numerals, the number");
+    assert!(L::None.marker(1).is_none());
+    for s in L::ALL {
+        assert_eq!(L::from_code(s.code()), s);
+    }
+    assert_eq!(L::from_code(99), L::None);
+}
+
+/// diw edit: each paragraph of a list starts with its marker; a long one wraps to the text beside
+/// the marker (a hanging indent), blank lines aren't counted, and the item reopens as a list.
+#[test]
+fn added_text_lists_number_paragraphs_with_a_hanging_indent() {
+    let mut doc = fixture();
+    let text = AddedText {
+        rect: [72.0, 600.0, 172.0, 700.0],
+        text: "Pour slab\n\nCure the concrete for seven days".into(),
+        size: 10.0,
+        list: crate::ListStyle::Decimal,
+        ..AddedText::default()
+    };
+    add_content(&mut doc, 0, &Content::Text(text.clone())).unwrap();
+    let doc = reopen(&doc);
+    let Content::Text(t) = &list_added(&doc)[0].content else { panic!() };
+    assert_eq!(t.list, crate::ListStyle::Decimal, "the list is kept for later editing");
+    let lines = added::lines(t);
+    assert_eq!(lines.first().map(String::as_str), Some("1. Pour slab"));
+    assert_eq!(lines.get(1).map(String::as_str), Some(""), "a blank line has no marker");
+    assert!(lines.get(2).is_some_and(|l| l.starts_with("2. Cure")), "{lines:?}");
+    assert!(lines.len() > 3, "the long item wraps: {lines:?}");
+    let item = streams(&doc, 0).into_iter().find(|s| s.contains("(1. Pour slab) Tj")).unwrap();
+    // The marker "2. " is 13.9 pt wide at 10 pt Helvetica (2, . and space: 556, 278, 278).
+    let indent = 72.0 + 0.001 * 10.0 * (556.0 + 278.0 + 278.0);
+    let wrapped_line = lines.get(3).unwrap();
+    assert!(
+        item.contains(&format!("1 0 0 1 {} ", crate::n(indent))) && item.contains(&format!("({wrapped_line}) Tj")),
+        "the wrapped line starts past the marker at {indent}: {item}"
+    );
+    assert!(item.contains("1 0 0 1 72 "), "the markers start at the box's edge: {item}");
+}
+
+/// A Thai list draws its markers in the Thai face, on Latin text too.
+#[test]
+fn thai_list_markers_are_drawn_with_the_thai_face() {
+    let mut doc = fixture();
+    let text = AddedText {
+        rect: [72.0, 600.0, 400.0, 700.0],
+        text: "Slab\nBeam".into(),
+        size: 12.0,
+        list: crate::ListStyle::ThaiDecimal,
+        ..AddedText::default()
+    };
+    if pdfcraft_fonts::document_thai_font().is_none() {
+        eprintln!("skipping the Thai list drawing checks: built without a craft-fonts Thai face (set CRAFT_FONTS_DIR)");
+        assert!(add_content(&mut doc, 0, &Content::Text(text)).is_err(), "Thai markers need the Thai face");
+        return;
+    }
+    add_content(&mut doc, 0, &Content::Text(text)).unwrap();
+    let item = streams(&reopen(&doc), 0).join("\n");
+    assert!(item.contains("/ActualText <FEFF0E51002E0020"), "the first marker reads ๑. for copy and search: {item}");
+    assert!(item.contains("/ActualText <FEFF0E52002E0020"), "the second marker reads ๒.: {item}");
+}
+
+/// diw edit: Arrange reorders added items among themselves; each run of chosen items keeps its
+/// order, and the items trade the places in the page's content they held.
+#[test]
+fn arranging_added_content_reorders_only_the_added_items() {
+    use crate::Layer as L;
+    let mut doc = fixture();
+    let text = |s: &str, y: f64| Content::Text(AddedText { rect: [72.0, y, 300.0, y + 20.0], text: s.into(), ..AddedText::default() });
+    for (i, name) in ["A", "B", "C", "D"].iter().enumerate() {
+        add_content(&mut doc, 0, &text(name, 700.0 - 30.0 * i as f64)).unwrap();
+    }
+    let order = |doc: &Document| -> String {
+        list_added(doc)
+            .iter()
+            .filter(|a| a.page == 0)
+            .map(|a| match &a.content {
+                Content::Text(t) => t.text.clone(),
+                Content::Image(_) => "?".into(),
+            })
+            .collect()
+    };
+    let others = |doc: &Document| streams(doc, 0).into_iter().filter(|s| !s.contains(") Tj")).collect::<Vec<_>>();
+    let before = others(&doc);
+    assert_eq!(arrange_content(&mut doc, 0, &[0], L::Front).unwrap(), [3]);
+    assert_eq!(order(&doc), "BCDA");
+    assert_eq!(others(&doc), before, "the page's own content stays as it was, behind");
+    assert_eq!(arrange_content(&mut doc, 0, &[3], L::Back).unwrap(), [0]);
+    assert_eq!(order(&doc), "ABCD");
+    assert_eq!(arrange_content(&mut doc, 0, &[0, 1], L::Forward).unwrap(), [1, 2], "a run moves together");
+    assert_eq!(order(&doc), "CABD");
+    assert_eq!(arrange_content(&mut doc, 0, &[2], L::Backward).unwrap(), [1]);
+    assert_eq!(order(&doc), "CBAD");
+    assert!(arrange_content(&mut doc, 0, &[3], L::Front).is_err(), "already in front");
+    assert!(arrange_content(&mut doc, 0, &[0], L::Backward).is_err(), "already at the back");
+    assert!(arrange_content(&mut doc, 0, &[9], L::Front).is_err(), "no such item");
+    assert!(arrange_content(&mut doc, 0, &[], L::Front).is_err(), "nothing chosen");
+    assert_eq!(order(&reopen(&doc)), "CBAD", "the order is saved");
+}
+
+/// diw edit: grouping records a group number on each item; it survives moving and retyping an
+/// item and reopening, and ungrouping takes it away.
+#[test]
+fn grouped_added_content_stays_grouped_until_ungrouped() {
+    let mut doc = fixture();
+    let text = |s: &str| Content::Text(AddedText { rect: [72.0, 700.0, 300.0, 720.0], text: s.into(), ..AddedText::default() });
+    for s in ["A", "B", "C"] {
+        add_content(&mut doc, 0, &text(s)).unwrap();
+    }
+    let groups = |doc: &Document| list_added(doc).iter().map(|a| a.group).collect::<Vec<_>>();
+    assert_eq!(groups(&doc), [None, None, None]);
+    let g = new_content_group(&doc, 0);
+    assert_eq!(g, 1);
+    set_content_group(&mut doc, 0, &[0, 2], Some(g)).unwrap();
+    assert_eq!(groups(&doc), [Some(1), None, Some(1)]);
+    assert_eq!(new_content_group(&doc, 0), 2, "a new group gets a number not in use");
+    let moved = text("A moved").with_rect([100.0, 500.0, 328.0, 520.0]);
+    update_content(&mut doc, 0, 0, &moved).unwrap();
+    let doc2 = reopen(&doc);
+    assert_eq!(groups(&doc2), [Some(1), None, Some(1)], "moving and retyping keep the group, and it is saved");
+    let mut doc = doc2;
+    set_content_group(&mut doc, 0, &[0, 2], None).unwrap();
+    assert_eq!(groups(&doc), [None, None, None]);
+    assert!(set_content_group(&mut doc, 0, &[5], Some(1)).is_err());
+}
+
+#[test]
 fn added_text_background_is_filled_behind_the_text_and_stays_editable() {
     let mut doc = fixture();
     let text = AddedText {

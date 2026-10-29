@@ -135,6 +135,7 @@ pub use tools::bulk_fields;
 use tools::calc_order_ui;
 use tools::camera_ui;
 pub use tools::comments;
+use tools::content_arrange_ui;
 use tools::content_ui;
 use tools::edit_text_ui;
 pub use tools::field_table_ui;
@@ -512,6 +513,8 @@ pub struct PdfCraftApp {
     pub system_clipboard: bool,
     /// What ⌘V reads instead of the system clipboard (tests).
     pub clipboard_override: Option<create_ui::Clip>,
+    /// diw edit: added content Copy put away for Paste.
+    pub(crate) content_clip: content_arrange_ui::ContentClip,
     /// V is down as a plain key press (see [`Self::paste_key_released`]).
     v_pressed: bool,
     /// Attach file: the file to attach instead of asking (tests, automation).

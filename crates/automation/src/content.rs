@@ -2,7 +2,7 @@
 //! move/resize/retype/restyle it, delete it. Geometry is in points from the top-left of the
 //! displayed page (y down), like every other tool.
 
-use pdfcraft_engine::{ADDED_CHAR_SPACING_LIMIT, AddedContent, AddedText, Edit, FontFamily, TextAlign};
+use pdfcraft_engine::{ADDED_CHAR_SPACING_LIMIT, AddedContent, AddedText, AlignBoxes, ContentLayer, Edit, FontFamily, ListStyle, TextAlign};
 use serde_json::{Value, json};
 
 use crate::comments::parse_color;
@@ -76,7 +76,32 @@ fn style(a: &Args, t: &mut AddedText) -> Result<()> {
     if let Some(b) = a.opt_str("background")? {
         t.background = if b.eq_ignore_ascii_case("none") { None } else { Some(parse_color(b)?) };
     }
+    if let Some(l) = a.opt_str("list")? {
+        t.list = LIST_NAMES
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(l))
+            .map(|(_, style)| *style)
+            .ok_or_else(|| bad(format!("unknown list {l:?} ({})", LIST_NAMES.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", "))))?;
+    }
     Ok(())
+}
+
+/// diw edit: the names the tools take and report for list styles.
+pub(crate) const LIST_NAMES: [(&str, ListStyle); 10] = [
+    ("none", ListStyle::None),
+    ("bullet", ListStyle::Bullet),
+    ("dash", ListStyle::Dash),
+    ("decimal", ListStyle::Decimal),
+    ("thai-decimal", ListStyle::ThaiDecimal),
+    ("thai-letter", ListStyle::ThaiLetter),
+    ("lower-alpha", ListStyle::LowerAlpha),
+    ("upper-alpha", ListStyle::UpperAlpha),
+    ("lower-roman", ListStyle::LowerRoman),
+    ("upper-roman", ListStyle::UpperRoman),
+];
+
+fn list_name(style: ListStyle) -> &'static str {
+    LIST_NAMES.iter().find(|(_, s)| *s == style).map_or("none", |(n, _)| n)
 }
 
 impl Automation {
@@ -102,9 +127,11 @@ impl Automation {
                         v["italic"] = json!(t.italic);
                         v["char_spacing"] = json!(t.char_spacing);
                         v["background"] = t.background.map_or(json!(null), |c| json!(hex(c)));
+                        v["list"] = json!(list_name(t.list));
                     }
                     AddedContent::Image(_) => v["type"] = json!("image"),
                 }
+                v["group"] = it.group.map_or(json!(null), |g| json!(g));
                 v
             })
             .collect();
@@ -181,8 +208,8 @@ impl Automation {
                 if a.get("text").is_some() {
                     return Err(bad("images have no text"));
                 }
-                if ["font", "size", "bold", "italic", "color", "align", "char_spacing", "background"].iter().any(|k| a.get(k).is_some()) {
-                    return Err(bad("font, size, bold, italic, color, align, char_spacing and background apply to text"));
+                if ["font", "size", "bold", "italic", "color", "align", "char_spacing", "background", "list"].iter().any(|k| a.get(k).is_some()) {
+                    return Err(bad("font, size, bold, italic, color, align, char_spacing, background and list apply to text"));
                 }
                 if let Some(deg) = a.opt_int("rotate")? {
                     if deg.rem_euclid(90) != 0 {
@@ -281,7 +308,84 @@ impl Automation {
     }
 }
 
+/// diw edit: the added items a tool names: `indices` (1-based, from content_list), or `index`.
+fn indices_arg(a: &Args, count: usize, page: usize) -> Result<Vec<usize>> {
+    let raw: Vec<i64> = match (a.get("indices"), a.opt_int("index")?) {
+        (Some(v), _) => v
+            .as_array()
+            .ok_or_else(|| bad("indices must be a list of item numbers"))?
+            .iter()
+            .map(|x| x.as_i64().ok_or_else(|| bad("indices must be whole numbers")))
+            .collect::<Result<_>>()?,
+        (None, Some(i)) => vec![i],
+        (None, None) => return Err(bad("pass indices (or index) from content_list")),
+    };
+    if raw.is_empty() || raw.len() > 1000 {
+        return Err(bad("pass 1 to 1000 item numbers"));
+    }
+    raw.into_iter()
+        .map(|i| {
+            usize::try_from(i)
+                .ok()
+                .and_then(|i| i.checked_sub(1))
+                .filter(|i| *i < count)
+                .ok_or_else(|| failed(format!("page {} has no added item {i} (see content_list)", page + 1)))
+        })
+        .collect()
+}
+
 impl Automation {
+    /// diw edit: Arrange: bring added items to the front or forward, or send them backward or to
+    /// the back, among the page's added items. Their groups come with them.
+    pub(crate) fn content_arrange(&mut self, a: &Args) -> Result<Value> {
+        let page = self.page(a)?;
+        let doc = self.doc(a)?;
+        let count = doc.added().iter().filter(|x| x.page == page).count();
+        let indices = doc.content_with_groups(page, &indices_arg(a, count, page)?);
+        let layer = match a.str("layer")? {
+            "front" => ContentLayer::Front,
+            "forward" => ContentLayer::Forward,
+            "backward" => ContentLayer::Backward,
+            "back" => ContentLayer::Back,
+            other => return Err(bad(format!("unknown layer {other:?} (front, forward, backward, back)"))),
+        };
+        self.apply(a, Edit::ArrangeContent { page, indices, layer })
+    }
+
+    /// diw edit: Group added items (two or more, with any groups they are in), or Ungroup them.
+    pub(crate) fn content_group(&mut self, a: &Args) -> Result<Value> {
+        let page = self.page(a)?;
+        let doc = self.doc(a)?;
+        let count = doc.added().iter().filter(|x| x.page == page).count();
+        let indices = doc.content_with_groups(page, &indices_arg(a, count, page)?);
+        let group = a.opt_bool("ungroup")? != Some(true);
+        let mut out = self.apply(a, Edit::GroupContent { page, indices: indices.clone(), group })?;
+        let doc = self.doc(a)?;
+        out["group"] = indices.first().and_then(|i| doc.content_group(page, *i)).map_or(json!(null), |g| json!(g));
+        Ok(out)
+    }
+
+    /// diw edit: Align or Distribute added items (groups move as one; one item lines up with the page).
+    pub(crate) fn content_align(&mut self, a: &Args) -> Result<Value> {
+        let page = self.page(a)?;
+        let doc = self.doc(a)?;
+        let count = doc.added().iter().filter(|x| x.page == page).count();
+        let indices = indices_arg(a, count, page)?;
+        let how = match a.str("how")? {
+            "left" => AlignBoxes::Left,
+            "center" | "centre" => AlignBoxes::Center,
+            "right" => AlignBoxes::Right,
+            "top" => AlignBoxes::Top,
+            "middle" => AlignBoxes::Middle,
+            "bottom" => AlignBoxes::Bottom,
+            "distribute-h" => AlignBoxes::DistributeH,
+            "distribute-v" => AlignBoxes::DistributeV,
+            other => return Err(bad(format!("unknown how {other:?} (left, center, right, top, middle, bottom, distribute-h, distribute-v)"))),
+        };
+        let edit = doc.align_content(page, &indices, how).map_err(failed)?;
+        self.apply(a, edit)
+    }
+
     /// One mixed inventory, with exact source references and the current document generation.
     pub(crate) fn object_list(&self, a: &Args) -> Result<Value> {
         let page = self.page(a)?;

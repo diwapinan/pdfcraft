@@ -90,6 +90,163 @@ pub enum Align {
     Justify,
 }
 
+/// diw edit: the marker each paragraph (each line typed with Enter) of a list starts with.
+/// Lines a paragraph wraps onto are indented to its text, past the marker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ListStyle {
+    #[default]
+    None,
+    /// •
+    Bullet,
+    /// –
+    Dash,
+    /// 1. 2. 3.
+    Decimal,
+    /// ๑. ๒. ๓.
+    ThaiDecimal,
+    /// ก. ข. ค.
+    ThaiLetter,
+    /// a. b. c.
+    LowerAlpha,
+    /// A. B. C.
+    UpperAlpha,
+    /// i. ii. iii.
+    LowerRoman,
+    /// I. II. III.
+    UpperRoman,
+}
+
+/// The Thai consonants as Thai documents count list items with them: ก ข ค ง … ฮ, without ฃ and
+/// ฅ (no longer in use) or ฆ.
+const THAI_LETTERS: [char; 41] = [
+    'ก', 'ข', 'ค', 'ง', 'จ', 'ฉ', 'ช', 'ซ', 'ฌ', 'ญ', 'ฎ', 'ฏ', 'ฐ', 'ฑ', 'ฒ', 'ณ', 'ด', 'ต', 'ถ', 'ท', 'ธ', 'น', 'บ', 'ป', 'ผ', 'ฝ', 'พ', 'ฟ', 'ภ',
+    'ม', 'ย', 'ร', 'ล', 'ว', 'ศ', 'ษ', 'ส', 'ห', 'ฬ', 'อ', 'ฮ',
+];
+
+impl ListStyle {
+    /// Every style, in the order the panel offers them.
+    pub const ALL: [ListStyle; 10] = [
+        ListStyle::None,
+        ListStyle::Bullet,
+        ListStyle::Dash,
+        ListStyle::Decimal,
+        ListStyle::ThaiDecimal,
+        ListStyle::ThaiLetter,
+        ListStyle::LowerAlpha,
+        ListStyle::UpperAlpha,
+        ListStyle::LowerRoman,
+        ListStyle::UpperRoman,
+    ];
+
+    /// The number written in `/PCAdded /List` (0 is no list, and what an unknown number reads as).
+    pub fn code(self) -> i64 {
+        match self {
+            ListStyle::None => 0,
+            ListStyle::Bullet => 1,
+            ListStyle::Dash => 2,
+            ListStyle::Decimal => 3,
+            ListStyle::ThaiDecimal => 4,
+            ListStyle::ThaiLetter => 5,
+            ListStyle::LowerAlpha => 6,
+            ListStyle::UpperAlpha => 7,
+            ListStyle::LowerRoman => 8,
+            ListStyle::UpperRoman => 9,
+        }
+    }
+
+    pub fn from_code(code: i64) -> ListStyle {
+        ListStyle::ALL.into_iter().find(|s| s.code() == code).unwrap_or_default()
+    }
+
+    /// How the panel shows the style: its first three markers.
+    pub fn sample(self) -> &'static str {
+        match self {
+            ListStyle::None => "",
+            ListStyle::Bullet => "•  •  •",
+            ListStyle::Dash => "–  –  –",
+            ListStyle::Decimal => "1.  2.  3.",
+            ListStyle::ThaiDecimal => "๑.  ๒.  ๓.",
+            ListStyle::ThaiLetter => "ก.  ข.  ค.",
+            ListStyle::LowerAlpha => "a.  b.  c.",
+            ListStyle::UpperAlpha => "A.  B.  C.",
+            ListStyle::LowerRoman => "i.  ii.  iii.",
+            ListStyle::UpperRoman => "I.  II.  III.",
+        }
+    }
+
+    /// The marker of the `n`th item (1-based), without the space after it; `None` for no list.
+    pub fn marker(self, n: usize) -> Option<String> {
+        let n = n.max(1);
+        Some(match self {
+            ListStyle::None => return None,
+            ListStyle::Bullet => "•".into(),
+            ListStyle::Dash => "–".into(),
+            ListStyle::Decimal => format!("{n}."),
+            ListStyle::ThaiDecimal => format!("{}.", n.to_string().chars().map(thai_digit).collect::<String>()),
+            ListStyle::ThaiLetter => format!("{}.", bijective(n, &THAI_LETTERS)),
+            ListStyle::LowerAlpha => format!("{}.", bijective(n, &LATIN_LOWER)),
+            ListStyle::UpperAlpha => format!("{}.", bijective(n, &LATIN_LOWER).to_uppercase()),
+            ListStyle::LowerRoman => format!("{}.", roman(n).unwrap_or_else(|| n.to_string())),
+            ListStyle::UpperRoman => format!("{}.", roman(n).map(|r| r.to_uppercase()).unwrap_or_else(|| n.to_string())),
+        })
+    }
+}
+
+const LATIN_LOWER: [char; 26] =
+    ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'];
+
+fn thai_digit(c: char) -> char {
+    c.to_digit(10).and_then(|d| char::from_u32(0x0E50 + d)).unwrap_or(c)
+}
+
+/// `n` (1-based) in a bijective numeration over `digits`: a, b, …, z, aa, ab, … Bounded: a `usize`
+/// takes at most 64 digits in any base of two or more.
+fn bijective(n: usize, digits: &[char]) -> String {
+    let base = digits.len();
+    if base == 0 {
+        return n.to_string();
+    }
+    let mut n = n;
+    let mut out = Vec::new();
+    while n > 0 {
+        let d = (n - 1) % base;
+        out.push(digits.get(d).copied().unwrap_or('?'));
+        n = (n - 1) / base;
+    }
+    out.iter().rev().collect()
+}
+
+/// `n` in lower-case Roman numerals, for 1 to 3999 (the numbers they have).
+fn roman(n: usize) -> Option<String> {
+    if !(1..=3999).contains(&n) {
+        return None;
+    }
+    const PARTS: [(usize, &str); 13] = [
+        (1000, "m"),
+        (900, "cm"),
+        (500, "d"),
+        (400, "cd"),
+        (100, "c"),
+        (90, "xc"),
+        (50, "l"),
+        (40, "xl"),
+        (10, "x"),
+        (9, "ix"),
+        (5, "v"),
+        (4, "iv"),
+        (1, "i"),
+    ];
+    let mut n = n;
+    let mut out = String::new();
+    for (value, part) in PARTS {
+        while n >= value {
+            out.push_str(part);
+            n -= value;
+        }
+    }
+    Some(out)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct AddedText {
     /// The text box in display space; its width wraps the text and its top is the first line's
@@ -107,6 +264,8 @@ pub struct AddedText {
     /// A colour filled behind the text, over the text box (see [`AddedText::background_rect`]);
     /// `None` leaves the page showing through.
     pub background: Option<[f64; 3]>,
+    /// diw edit: a bulleted or numbered list, one item per paragraph.
+    pub list: ListStyle,
 }
 
 impl AddedText {
@@ -135,6 +294,7 @@ impl Default for AddedText {
             align: Align::Left,
             char_spacing: 0.0,
             background: None,
+            list: ListStyle::None,
         }
     }
 }
@@ -219,6 +379,22 @@ pub struct Added {
     /// The item's content stream.
     pub obj: ObjRef,
     pub content: Content,
+    /// diw edit: the group the item belongs to on its page (`/PCAdded /Group`), if any. Items of
+    /// one group are selected, moved, copied, ordered and aligned together.
+    pub group: Option<u32>,
+}
+
+/// diw edit: where Arrange puts added items among the page's added items (their drawing order).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Layer {
+    /// In front of every other added item.
+    Front,
+    /// One item further forward.
+    Forward,
+    /// One item further back.
+    Backward,
+    /// Behind every other added item (still over the page's own content).
+    Back,
 }
 
 /// PdfCraft-owned page content discovered in one page/content traversal.
