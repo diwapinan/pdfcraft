@@ -22,12 +22,12 @@ pub(super) type LaidLine = (String, bool, Vec<Piece>, f64);
 /// Draw a text item that has Arabic, Hebrew or Thai in it. Each line is laid out in display order; their glyphs
 /// come from Type 3 fonts drawn from the craft-fonts face's outlines (no font file is embedded),
 /// with a ToUnicode map for copy and search. Other text uses the item's standard font.
-fn draw_shaped(doc: &mut Document, t: &AddedText, taken: &Dict, fonts: &mut Dict, out: &mut Vec<u8>) -> Result<(), EditError> {
+fn draw_shaped(doc: &mut Document, t: &AddedText, taken: &Dict, fonts: &mut Dict, out: &mut Vec<u8>, paths: bool) -> Result<(), EditError> {
     let lines = wrapped_lines(t);
     let indents: Vec<f64> = lines.iter().map(|l| l.indent).collect();
     let laid =
         lines.into_iter().map(|l| shaped_layout(t, &l.text, l.rtl).map(|(pieces, w)| (l.text, l.rtl, pieces, w))).collect::<Result<Vec<_>, _>>()?;
-    draw_laid_shaped_indented(doc, t, &laid, &indents, taken, fonts, out, shaped_glyph)
+    draw_laid_shaped_indented(doc, t, &laid, &indents, taken, fonts, out, shaped_glyph, paths)
 }
 
 /// [`draw_shaped`] for lines that are already laid out. `outline` is the source of glyph outlines
@@ -42,11 +42,12 @@ pub(super) fn draw_laid_shaped(
     out: &mut Vec<u8>,
     outline: impl Fn(ShapedScript, u32) -> Result<GlyphOutline, GlyphError>,
 ) -> Result<(), EditError> {
-    draw_laid_shaped_indented(doc, t, laid, &[], taken, fonts, out, outline)
+    draw_laid_shaped_indented(doc, t, laid, &[], taken, fonts, out, outline, false)
 }
 
 /// [`draw_laid_shaped`] with each line's indent from the box's edge (a list item's lines after
-/// its first; a missing indent is none).
+/// its first; a missing indent is none). With `paths`, the shaped glyphs are filled outlines in
+/// the content instead of Type 3 text (for printing: see [`super::store::shaped_text_as_paths`]).
 #[allow(clippy::too_many_arguments)]
 fn draw_laid_shaped_indented(
     doc: &mut Document,
@@ -57,6 +58,7 @@ fn draw_laid_shaped_indented(
     fonts: &mut Dict,
     out: &mut Vec<u8>,
     outline: impl Fn(ShapedScript, u32) -> Result<GlyphOutline, GlyphError>,
+    paths: bool,
 ) -> Result<(), EditError> {
     let r = text_rect(t);
     let latin = font_name(t.family.base_font(t.bold, t.italic));
@@ -90,7 +92,7 @@ fn draw_laid_shaped_indented(
     // The names the page and this item already use: a new font never takes one of them.
     let mut taken_names: HashSet<Vec<u8>> = taken.iter().chain(fonts.iter()).map(|(name, _)| name.clone()).collect();
     let mut names = Vec::new();
-    for chunk in keys.chunks(GLYPHS_PER_FONT) {
+    for chunk in keys.chunks(GLYPHS_PER_FONT).filter(|_| !paths) {
         let font = type3_shaped(doc, chunk, &outlines);
         // A name no font on the page has, so items never replace each other's fonts (object
         // numbers alone don't do: a full save renumbers objects but keeps resource names).
@@ -113,7 +115,10 @@ fn draw_laid_shaped_indented(
         // Shaped glyphs are painted in visual order. Keep the original line's typing order
         // explicitly, including marks, ligatures, digits and mixed-script punctuation.
         let logical: String = line.encode_utf16().map(|u| format!("{u:04X}")).collect();
-        out.extend(format!("/Span <</ActualText <FEFF{logical}>>> BDC\n").bytes());
+        // Not with paths: a marked-content sequence may not cross the text objects they split.
+        if !paths {
+            out.extend(format!("/Span <</ActualText <FEFF{logical}>>> BDC\n").bytes());
+        }
         let spaces = line.matches(' ').count();
         let indent = indents.get(i).copied().filter(|v| v.is_finite()).unwrap_or(0.0).max(0.0);
         // Justified: the spaces of every line but the last stretch to fill the box (beside the indent).
@@ -139,6 +144,27 @@ fn draw_laid_shaped_indented(
                     current = Some(latin.as_str());
                     pen += latin_width(t, s) + tw * s.matches(' ').count() as f64;
                 }
+                Piece::Shaped(clusters) if paths => {
+                    for c in clusters {
+                        // The cluster's outlines, in ems, filled at the pen: outside the text object.
+                        let mut glyph = Vec::new();
+                        for (id, [dx, dy]) in &c.glyphs {
+                            let Some(g) = outlines.get(&(c.script, *id)) else { continue };
+                            for contour in &g.contours {
+                                for (j, p) in contour.iter().enumerate() {
+                                    glyph.extend(format!("{} {} {}\n", n(p[0] + dx), n(p[1] + dy), if j == 0 { "m" } else { "l" }).bytes());
+                                }
+                                glyph.extend_from_slice(b"h\n");
+                            }
+                        }
+                        if !glyph.is_empty() {
+                            out.extend(format!("ET q {} 0 0 {} {} {} cm\n", n(t.size), n(t.size), n(pen), n(y)).bytes());
+                            out.extend(glyph);
+                            out.extend_from_slice(b"f Q BT\n");
+                        }
+                        pen += c.advance * t.size + t.char_spacing + if c.text == " " { tw } else { 0.0 };
+                    }
+                }
                 Piece::Shaped(clusters) => {
                     for c in clusters {
                         let Some(&k) = index.get(&cluster_key(c)) else { continue };
@@ -157,7 +183,9 @@ fn draw_laid_shaped_indented(
                 }
             }
         }
-        out.extend_from_slice(b"EMC\n");
+        if !paths {
+            out.extend_from_slice(b"EMC\n");
+        }
     }
     out.extend_from_slice(b"ET\n");
     Ok(())
@@ -265,7 +293,7 @@ fn type3_shaped(doc: &mut Document, clusters: &[&ShapedCluster], outlines: &Hash
 /// page's font names. `existing`: the item is being replaced, so a build without the Arabic or
 /// Hebrew face keeps drawing that text as `?`, as before it was supported, rather than refusing to
 /// move it.
-pub(super) fn draw(doc: &mut Document, c: &Content, view: [f64; 6], taken: &Dict, existing: bool) -> Result<(Vec<u8>, Dict), EditError> {
+pub(super) fn draw(doc: &mut Document, c: &Content, view: [f64; 6], taken: &Dict, existing: bool, paths: bool) -> Result<(Vec<u8>, Dict), EditError> {
     let mut res = Dict::new();
     let mut out = format!(
         "q {} {} {} {} {} {} cm\n",
@@ -301,7 +329,7 @@ pub(super) fn draw(doc: &mut Document, c: &Content, view: [f64; 6], taken: &Dict
                 || face_or_new(is_arabic, pdfcraft_fonts::document_arabic_font().is_some())
                 || face_or_new(is_hebrew, pdfcraft_fonts::document_hebrew_font(false).is_some())
             {
-                draw_shaped(doc, t, taken, &mut fonts, &mut out)?;
+                draw_shaped(doc, t, taken, &mut fonts, &mut out, paths)?;
                 res.set(b"Font".to_vec(), Object::Dict(fonts));
                 out.extend_from_slice(b"Q\n");
                 return Ok((out, res));

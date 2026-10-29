@@ -186,6 +186,11 @@ fn validate(c: &Content) -> Result<(), EditError> {
 
 /// Write an item's stream (new, or replacing `obj`) and make its resources available to the page.
 fn write(doc: &mut Document, page: usize, c: &Content, obj: Option<ObjRef>) -> Result<ObjRef, EditError> {
+    write_with(doc, page, c, obj, false)
+}
+
+/// [`write`], drawing shaped glyphs as filled paths with `paths` instead of Type 3 text.
+fn write_with(doc: &mut Document, page: usize, c: &Content, obj: Option<ObjRef>, paths: bool) -> Result<ObjRef, EditError> {
     validate(c)?;
     let all = page_list(doc);
     check(&[page], all.len())?;
@@ -199,7 +204,7 @@ fn write(doc: &mut Document, page: usize, c: &Content, obj: Option<ObjRef>) -> R
         drop_fonts(doc, &mut pres, &own_fonts(doc, r));
     }
     let taken = pres.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
-    let (content, res) = draw(doc, c, view, &taken, obj.is_some())?;
+    let (content, res) = draw(doc, c, view, &taken, obj.is_some(), paths)?;
     if obj.is_none() {
         crate::check_on_top(doc, p)?;
     }
@@ -411,6 +416,25 @@ fn arranged_order(n: usize, wanted: &[usize], layer: Layer) -> Vec<usize> {
 /// with `layer`: their new indexes, in drawing order. For an interface to keep them selected.
 pub fn arranged_positions(n: usize, wanted: &[usize], layer: Layer) -> Vec<usize> {
     arranged_order(n, wanted, layer).iter().enumerate().filter(|(_, old)| wanted.contains(old)).map(|(new, _)| new).collect()
+}
+
+/// diw edit: redraw every added text that is drawn with Type 3 fonts (Thai, Arabic, Hebrew) with
+/// its glyphs as filled paths instead, for a copy of the document that is only printed. Windows'
+/// PDF renderer, which prints on Windows, crashes on those Type 3 fonts. The pages look the same;
+/// the copy's added text is no longer text (not searchable), which a print doesn't need. Returns
+/// how many items were redrawn.
+pub fn shaped_text_as_paths(doc: &mut Document) -> Result<usize, EditError> {
+    let mut redrawn = 0usize;
+    for item in list_added(doc) {
+        let Content::Text(t) = &item.content else { continue };
+        if own_fonts(doc, item.obj).is_empty() {
+            continue;
+        }
+        // Written for its page's /UserUnit; `list_added` scaled it to display points already.
+        write_with(doc, item.page, &Content::Text(t.clone()), Some(item.obj), true)?;
+        redrawn = redrawn.saturating_add(1);
+    }
+    Ok(redrawn)
 }
 
 /// Leave only item `index` on `page`: its contents become the item's own stream and its

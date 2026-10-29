@@ -1483,6 +1483,43 @@ fn print_restricted_documents_disable_print_unless_opened_by_the_owner() {
     assert!(enabled(&s, low, "print.dialog"), "low-resolution printing is printing");
 }
 
+/// diw edit: added Thai text prints as filled outlines, not as Type 3 text, which crashes Windows'
+/// PDF renderer when it prints; the document itself keeps its Thai text as text.
+#[test]
+fn added_thai_text_prints_as_outlines_without_type3_fonts() {
+    let (mut s, id) = session_with(1);
+    let text =
+        AddedText {
+            rect: [72.0, 600.0, 400.0, 700.0], text: "งาน Deck Slab".into(), bold: true, background: Some([1.0; 3]), ..AddedText::default()
+        };
+    if pdfcraft_fonts::document_thai_font().is_none() {
+        eprintln!("skipping the Thai print checks: built without a craft-fonts Thai face (set CRAFT_FONTS_DIR)");
+        return;
+    }
+    s.apply(id, Edit::AddText { page: 0, text }).unwrap();
+    let type3 = |bytes: Arc<Vec<u8>>| {
+        let doc = pdfcraft_cos::Document::open(bytes).unwrap();
+        doc.scan_objects().filter(|(_, o)| matches!(&**o, pdfcraft_cos::Object::Dict(d) if d.name(b"Subtype") == Some(b"Type3"))).count()
+    };
+    assert!(type3(s.save_bytes(id).unwrap()) > 0, "the document draws its Thai text with Type 3 fonts");
+    let actual = print::Settings { pages: vec![0], layout: print::Layout::Size(print::SizeMode::Actual), ..Default::default() };
+    let printed = s.print_pdf(id, &actual).unwrap();
+    let mut s2 = Session::new();
+    let id2 = s2.open("print.pdf", None, Arc::new(printed.clone()), None).unwrap();
+    let words = page_texts(&s2, id2).join(" ");
+    assert!(words.contains("Deck Slab"), "the Latin words print as text: {words}");
+    assert!(!words.contains("งาน"), "the Thai prints as outlines: {words}");
+    let doc = pdfcraft_cos::Document::open(Arc::new(printed.clone())).unwrap();
+    let live: Vec<_> = pdfcraft_model::pages(&doc)
+        .iter()
+        .flat_map(|p| p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()))
+        .flat_map(|r| r.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()))
+        .flat_map(|f| f.iter().map(|(_, v)| doc.resolve(v).as_dict().and_then(|d| d.name(b"Subtype").map(<[u8]>::to_vec))).collect::<Vec<_>>())
+        .collect();
+    assert!(!live.iter().any(|t| t.as_deref() == Some(&b"Type3"[..])), "no printed page uses a Type 3 font: {live:?}");
+    assert!(type3(s.save_bytes(id).unwrap()) > 0, "the document itself is unchanged");
+}
+
 /// Table 22, bit 12 clear: printing is limited to a low-level representation. Whatever the
 /// settings ask for, the print-ready PDF carries each page as a picture of at most 150 dpi, with
 /// no text or vector artwork left; the owner password lifts the limit.

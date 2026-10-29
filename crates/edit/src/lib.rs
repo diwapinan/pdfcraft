@@ -54,7 +54,7 @@ pub mod added;
 pub use added::{
     Added, AddedImage, AddedText, Align, AlignBoxes, Content, Family, Layer, ListStyle, MarkerScan, add_content, align_offsets, arrange_content,
     arranged_positions, delete_content, first_undrawable, isolate_content, list_added, new_content_group, scan_markers, set_content_group,
-    update_content,
+    shaped_text_as_paths, update_content,
 };
 
 mod apply;

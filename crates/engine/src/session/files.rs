@@ -155,6 +155,15 @@ impl Session {
         if !doc.config.layers.is_empty() {
             set_default_layer_state(&mut cos, &doc.info.layers);
         }
+        // diw edit: added Thai (Arabic, Hebrew) text prints as the outlines it is drawn with, not as
+        // Type 3 text: Windows' PDF renderer, which prints on Windows, crashes the app on PdfCraft's
+        // Type 3 fonts. Only this print copy changes. A Type 3 font from elsewhere left on a printed
+        // page makes Windows print the pages as pictures instead.
+        pdfcraft_edit::shaped_text_as_paths(&mut cos).map_err(|e| EditError::Print(e.to_string()))?;
+        if cfg!(windows) && has_type3_fonts(&cos, &settings.pages) {
+            let raster = print::Settings { raster: Some(print::Raster::default()), ..settings.clone() };
+            return self.print_pdf(id, &raster);
+        }
         pdfcraft_print::impose(&cos, settings).map_err(|e| EditError::Print(e.to_string()))
     }
 
@@ -398,4 +407,45 @@ impl Session {
         let doc = writable(doc)?;
         write_full(&doc, &opts).map(Arc::new).map_err(|e| EditError::Write(e.to_string()))
     }
+}
+
+/// diw edit: whether a page of `pages` (0-based) shows text with a Type 3 font, in its own resources
+/// or those of the forms it draws (a few levels down; each form once).
+fn has_type3_fonts(cos: &pdfcraft_cos::Document, pages: &[usize]) -> bool {
+    use pdfcraft_cos::Object;
+    fn in_resources(cos: &pdfcraft_cos::Document, res: &Object, depth: usize, seen: &mut Vec<pdfcraft_cos::ObjRef>) -> bool {
+        if depth > 8 {
+            return false;
+        }
+        let res = cos.resolve(res);
+        let Some(res) = res.as_dict() else { return false };
+        let type3 = res.get(b"Font").map(|f| cos.resolve(f)).is_some_and(|fonts| {
+            fonts
+                .as_dict()
+                .is_some_and(|fonts| fonts.iter().any(|(_, f)| cos.resolve(f).as_dict().and_then(|f| f.name(b"Subtype")) == Some(b"Type3")))
+        });
+        if type3 {
+            return true;
+        }
+        let Some(xobjects) = res.get(b"XObject").map(|x| cos.resolve(x)) else { return false };
+        let Some(xobjects) = xobjects.as_dict() else { return false };
+        for (_, x) in xobjects.iter() {
+            let Some(r) = x.as_ref() else { continue };
+            if seen.contains(&r) || seen.len() > 4096 {
+                continue;
+            }
+            seen.push(r);
+            if let Object::Stream(form) = &*cos.get(r)
+                && form.dict.name(b"Subtype") == Some(b"Form")
+                && let Some(inner) = form.dict.get(b"Resources")
+                && in_resources(cos, inner, depth + 1, seen)
+            {
+                return true;
+            }
+        }
+        false
+    }
+    let all = pdfcraft_model::pages(cos);
+    let mut seen = Vec::new();
+    pages.iter().filter_map(|p| all.get(*p)).any(|p| p.dict.get(b"Resources").is_some_and(|r| in_resources(cos, r, 0, &mut seen)))
 }
