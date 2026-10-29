@@ -104,6 +104,22 @@ pub struct AddedText {
     pub align: Align,
     /// Extra space after every character, in points: the PDF's character spacing (`Tc`).
     pub char_spacing: f64,
+    /// A colour filled behind the text, over the text box (see [`AddedText::background_rect`]);
+    /// `None` leaves the page showing through.
+    pub background: Option<[f64; 3]>,
+}
+
+impl AddedText {
+    /// Space between the text and the edge of its background, as a fraction of the font size.
+    pub const BACKGROUND_PAD: f64 = 0.2;
+
+    /// The box the background fills, in display space: the text box grown by
+    /// [`AddedText::BACKGROUND_PAD`] on every side, so letters don't touch its edge.
+    pub fn background_rect(&self) -> [f64; 4] {
+        let [x0, y0, x1, y1] = super::layout::text_rect(self);
+        let pad = if self.size.is_finite() { self.size.max(0.0) * Self::BACKGROUND_PAD } else { 0.0 };
+        [x0 - pad, y0 - pad, x1 + pad, y1 + pad]
+    }
 }
 
 impl Default for AddedText {
@@ -118,6 +134,7 @@ impl Default for AddedText {
             color: [0.0; 3],
             align: Align::Left,
             char_spacing: 0.0,
+            background: None,
         }
     }
 }

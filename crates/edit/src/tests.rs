@@ -958,6 +958,37 @@ fn combined_marker_scan_matches_the_independent_scans() {
 }
 
 #[test]
+fn added_text_background_is_filled_behind_the_text_and_stays_editable() {
+    let mut doc = fixture();
+    let text = AddedText {
+        rect: [72.0, 600.0, 300.0, 700.0],
+        text: "Pour C3-1".into(),
+        size: 10.0,
+        background: Some([1.0, 1.0, 0.0]),
+        ..AddedText::default()
+    };
+    add_content(&mut doc, 0, &Content::Text(text.clone())).unwrap();
+    let doc2 = reopen(&doc);
+    let item = streams(&doc2, 0).into_iter().find(|s| s.contains("(Pour C3-1) Tj")).unwrap();
+    // One line of 10 pt is 12 pt high; the fill is padded by 2 pt (0.2 em) on every side.
+    let fill = item.find("1 1 0 rg 70 686 232 16 re f").unwrap_or_else(|| panic!("no background fill: {item}"));
+    assert!(fill < item.find("BT").unwrap(), "the background is painted before the text: {item}");
+    let Content::Text(t) = &list_added(&doc2)[0].content else { panic!() };
+    assert_eq!(t.background, Some([1.0, 1.0, 0.0]), "the background is kept for later editing");
+
+    // Removing it leaves plain text; an out-of-range colour is refused and changes nothing.
+    let mut doc = doc2;
+    update_content(&mut doc, 0, 0, &Content::Text(AddedText { background: None, ..t.clone() })).unwrap();
+    let item = streams(&doc, 0).into_iter().find(|s| s.contains("(Pour C3-1) Tj")).unwrap();
+    assert!(!item.contains(" re f"), "{item}");
+    let Content::Text(t) = &list_added(&doc)[0].content else { panic!() };
+    assert_eq!(t.background, None);
+    for bad in [[2.0, 0.0, 0.0], [f64::NAN, 0.0, 0.0]] {
+        assert!(update_content(&mut doc, 0, 0, &Content::Text(AddedText { background: Some(bad), ..t.clone() })).is_err(), "{bad:?}");
+    }
+}
+
+#[test]
 fn added_text_and_images_are_page_content_that_stays_editable() {
     let mut doc = fixture();
     let text = AddedText { rect: [72.0, 600.0, 300.0, 700.0], text: "Approved by Ada\nSecond line".into(), size: 14.0, ..AddedText::default() };

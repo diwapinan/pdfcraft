@@ -240,6 +240,25 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, look: &mut AddedText, extras:
         number_with_presets(ui, spacing, &CHAR_SPACINGS, half, (label.id, tl!("Character spacing")));
     });
 
+    // A colour filled behind added text. Existing text in the PDF has no background of its own.
+    if !editing {
+        row(ui, |ui| {
+            let label = labelled_icon(ui, t, "paint-bucket", tl!("Background"));
+            let swatch = background_button(ui, t, look.background).labelled_by(label.id);
+            egui::Popup::menu(&swatch).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                if ui.selectable_label(look.background.is_none(), tl!("No fill")).clicked() {
+                    look.background = None;
+                    ui.close();
+                }
+                ui.separator();
+                if let Some(picked) = crate::comments::swatch_grid(ui, look.background) {
+                    look.background = Some(picked);
+                    ui.close();
+                }
+            });
+        });
+    }
+
     out.changed = (look.clone(), extras.as_deref().copied()) != before;
     ui.add_space(6.0);
     ui.separator();
@@ -324,6 +343,27 @@ fn colour_button(ui: &mut egui::Ui, t: &Tokens, color: [f64; 3]) -> egui::Respon
     let stroke = if resp.hovered() { t.text } else { t.border };
     ui.painter().rect_stroke(fill, CornerRadius::same(2), Stroke::new(1.0, stroke), egui::StrokeKind::Outside);
     crate::theme::hand(resp).on_hover_text(tl!("Colour"))
+}
+
+/// The background colour as a square swatch that opens the palette; with no background, an
+/// empty square crossed by a red diagonal.
+fn background_button(ui: &mut egui::Ui, t: &Tokens, color: Option<[f64; 3]>) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tl!("Background")));
+    let fill = rect.shrink(4.0);
+    match color {
+        Some(c) => {
+            let [r, g, b] = c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+            ui.painter().rect_filled(fill, CornerRadius::same(2), Color32::from_rgb(r, g, b));
+        }
+        None => {
+            ui.painter().line_segment([fill.left_bottom(), fill.right_top()], Stroke::new(1.5, Color32::from_rgb(0xE3, 0x22, 0x22)));
+        }
+    }
+    let stroke = if resp.hovered() { t.text } else { t.border };
+    ui.painter().rect_stroke(fill, CornerRadius::same(2), Stroke::new(1.0, stroke), egui::StrokeKind::Outside);
+    let tip = if color.is_some() { tl!("Background") } else { tl!("No fill") };
+    crate::theme::hand(resp).on_hover_text(tip)
 }
 
 #[cfg(test)]

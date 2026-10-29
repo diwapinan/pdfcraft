@@ -8,6 +8,12 @@ use serde_json::{Value, json};
 use crate::comments::parse_color;
 use crate::{Args, Automation, Result, ToolError, failed};
 
+/// A colour as `#RRGGBB`.
+fn hex(c: [f64; 3]) -> String {
+    let [r, g, b] = c.map(|v| (if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 } * 255.0).round() as u8);
+    format!("#{r:02X}{g:02X}{b:02X}")
+}
+
 fn bad(m: impl Into<String>) -> ToolError {
     ToolError::InvalidArgs(m.into())
 }
@@ -67,6 +73,9 @@ fn style(a: &Args, t: &mut AddedText) -> Result<()> {
         }
         t.char_spacing = c;
     }
+    if let Some(b) = a.opt_str("background")? {
+        t.background = if b.eq_ignore_ascii_case("none") { None } else { Some(parse_color(b)?) };
+    }
     Ok(())
 }
 
@@ -92,6 +101,7 @@ impl Automation {
                         v["bold"] = json!(t.bold);
                         v["italic"] = json!(t.italic);
                         v["char_spacing"] = json!(t.char_spacing);
+                        v["background"] = t.background.map_or(json!(null), |c| json!(hex(c)));
                     }
                     AddedContent::Image(_) => v["type"] = json!("image"),
                 }
@@ -171,8 +181,8 @@ impl Automation {
                 if a.get("text").is_some() {
                     return Err(bad("images have no text"));
                 }
-                if ["font", "size", "bold", "italic", "color", "align", "char_spacing"].iter().any(|k| a.get(k).is_some()) {
-                    return Err(bad("font, size, bold, italic, color, align and char_spacing apply to text"));
+                if ["font", "size", "bold", "italic", "color", "align", "char_spacing", "background"].iter().any(|k| a.get(k).is_some()) {
+                    return Err(bad("font, size, bold, italic, color, align, char_spacing and background apply to text"));
                 }
                 if let Some(deg) = a.opt_int("rotate")? {
                     if deg.rem_euclid(90) != 0 {

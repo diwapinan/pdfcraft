@@ -4649,6 +4649,25 @@ fn added_text_takes_character_spacing() {
     assert_eq!(ok(&mut a, "content_list", json!({ "doc": doc }))["items"][0]["char_spacing"], -0.5);
 }
 
+/// A background colour behind added text: set when adding, listed back, changed, removed with
+/// "none", and refused when it isn't a colour.
+#[test]
+fn added_text_takes_a_background() {
+    let dir = workdir("content-background");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let list = |a: &mut Automation| ok(a, "content_list", json!({ "doc": doc }))["items"][0]["background"].clone();
+    ok(&mut a, "page_add_text", json!({ "doc": doc, "page": 1, "text": "Label", "at": [20, 20], "background": "#FFFF00" }));
+    assert_eq!(list(&mut a), "#FFFF00");
+    ok(&mut a, "content_update", json!({ "doc": doc, "page": 1, "index": 1, "background": "white" }));
+    assert_eq!(list(&mut a), "#FFFFFF");
+    let args = json!({ "doc": doc, "page": 1, "index": 1, "background": "not-a-colour" });
+    assert!(matches!(a.call("content_update", &args), Err(ToolError::InvalidArgs(_))));
+    assert_eq!(list(&mut a), "#FFFFFF", "a refused colour changes nothing");
+    ok(&mut a, "content_update", json!({ "doc": doc, "page": 1, "index": 1, "background": "none" }));
+    assert_eq!(list(&mut a), Value::Null);
+}
+
 fn added_rotation_image(dir: &Path) {
     let mut png = Vec::new();
     let mut enc = png::Encoder::new(&mut png, 2, 1);

@@ -26,6 +26,11 @@ fn parse(doc: &Document, d: &Dict) -> Option<Content> {
                 },
                 // Items written before character spacing have none.
                 char_spacing: d.get(b"CharSpacing").and_then(Object::as_f64).filter(|v| v.is_finite()).unwrap_or(0.0),
+                // Items written before backgrounds, or with a malformed one, have none.
+                background: <[f64; 3]>::try_from(nums(doc, d.get(b"Background")))
+                    .ok()
+                    .filter(|c| c.iter().all(|v| v.is_finite()))
+                    .map(|c| c.map(|v| v.clamp(0.0, 1.0))),
             }))
         }
         b"Image" => {
@@ -130,6 +135,9 @@ fn validate(c: &Content) -> Result<(), EditError> {
                 return Err(EditError::Invalid(format!(
                     "the character spacing must be between -{CHAR_SPACING_LIMIT} and {CHAR_SPACING_LIMIT} points"
                 )));
+            }
+            if t.background.is_some_and(|c| !c.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v))) {
+                return Err(EditError::Invalid("the background colour must have components between 0 and 1".into()));
             }
             if (r[2] - r[0]).abs() < 1.0 {
                 return Err(EditError::Invalid("the text box is too narrow".into()));
