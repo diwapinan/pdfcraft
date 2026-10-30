@@ -178,3 +178,40 @@ fn the_add_text_tool_selects_several_items_with_shift_and_groups_them() {
     assert!(h.state().views[0].content.draft.is_none(), "no new text from a Shift+click");
     assert_eq!(added(&h).len(), 3);
 }
+
+/// diw edit: Done leaves the Add text tool for Select with the Edit panel open. Added items can
+/// still be selected several at a time there (click, then Shift+click) and grouped.
+#[test]
+fn after_done_select_takes_several_added_items_and_groups_them() {
+    let mut h = harness_in("edit.text");
+    // Type a new text and finish it with Done, as people add text.
+    let empty = at(&h, 250.0, 200.0);
+    h.hover_at(empty);
+    h.run_steps(2);
+    h.drag_at(empty);
+    h.run_steps(1);
+    h.drop_at(empty);
+    h.run_steps(4);
+    h.event(egui::Event::Text("D".into()));
+    h.run_steps(3);
+    h.get_by_label("Done adding text").click();
+    h.run_steps(6);
+    assert_eq!(h.state().quick_tool, pdfcraft_ui_egui::QuickTool::Select, "Done leaves the Add text tool");
+    assert_eq!(added(&h).len(), 4);
+    // A plain click on A selects it; Shift+click on B adds B.
+    let (ax, ay) = centre(0);
+    let a = at(&h, ax, ay);
+    h.hover_at(a);
+    h.run_steps(2);
+    h.drag_at(a);
+    h.run_steps(1);
+    h.drop_at(a);
+    h.run_steps(4);
+    let (bx, by) = centre(1);
+    let b = at(&h, bx, by);
+    shift_click(&mut h, b);
+    h.get_by_label("2 objects selected");
+    key(&mut h, Modifiers::COMMAND, Key::G);
+    let groups: Vec<_> = added(&h).iter().map(|a| a.group).collect();
+    assert!(groups[0].is_some() && groups[0] == groups[1] && groups[2].is_none() && groups[3].is_none(), "{groups:?}");
+}

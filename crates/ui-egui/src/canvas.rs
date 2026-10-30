@@ -1260,11 +1260,12 @@ fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<
         crate::redact_ui::page_input(cx, over_text, view)
     };
     let image_owns_pointer = tool == QuickTool::EditText && crate::edit_text_ui::image_owns_pointer(ui, &xf, ptr, i, info, view);
-    // diw edit: several added items can be selected with the Add text tool too (Shift or Ctrl and a click).
+    // diw edit: several added items can be selected (Shift or Ctrl and a click) whenever added content
+    // can be edited: the Add text tool, and Select with the Edit panel open (where Done leaves you).
     let on_objects = !image_owns_pointer
-        && matches!(tool, QuickTool::EditText | QuickTool::AddText)
+        && multi_select(tool, editing_content)
         && can_modify
-        && crate::object_ui::page_input(cx, view, tool == QuickTool::AddText);
+        && crate::object_ui::page_input(cx, view, tool != QuickTool::EditText, tool == QuickTool::AddText);
     let lines = if matches!(tool, QuickTool::AddText | QuickTool::EditText) && can_modify {
         let generation = doc.edit_generation();
         match view.edit_lines.get(&i) {
@@ -1597,7 +1598,7 @@ fn page_overlays(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<'_
     if editing_content {
         crate::content_ui::paint_page(painter, &xf, i, info, added, view, pointer);
     }
-    if matches!(tool, QuickTool::EditText | QuickTool::AddText) {
+    if multi_select(tool, editing_content) {
         crate::object_ui::paint(painter, &xf, i, info, &view.objects);
     }
     if tool == QuickTool::EnhanceCamera {
@@ -2116,6 +2117,12 @@ fn draw_pages(
         stamp_placed,
     };
     (wanted, visible_now)
+}
+
+/// diw edit: whether several objects can be selected: Edit text & images (any object), or added
+/// content wherever it can be edited (the Edit panel open, or a content tool).
+pub(crate) fn multi_select(tool: QuickTool, editing_content: bool) -> bool {
+    tool == QuickTool::EditText || editing_content && matches!(tool, QuickTool::Select | QuickTool::AddText)
 }
 
 /// A zoom the fit mode changed keeps the page at the top of the view in place.
@@ -3021,13 +3028,13 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     } else {
         view.prepare.selected = None;
     }
-    view.objects.prepare(doc, matches!(tool, QuickTool::EditText | QuickTool::AddText) && can_modify, ui.ctx());
+    view.objects.prepare(doc, multi_select(tool, editing_content) && can_modify, ui.ctx());
     view.text_background.prepare(ui.ctx(), doc, view.line_editor.as_ref(), view.content.draft.as_ref(), scale);
     let added = if editing_content { doc.added().to_vec() } else { Vec::new() };
     let doc_links = if tool == QuickTool::Link { doc.links().to_vec() } else { Vec::new() };
     if editing_content {
         crate::content_ui::after_refresh(view, &added);
-        crate::content_arrange_ui::follow_groups(view, doc, matches!(tool, QuickTool::EditText | QuickTool::AddText) && can_modify);
+        crate::content_arrange_ui::follow_groups(view, doc, multi_select(tool, editing_content) && can_modify);
     } else {
         view.content.selected = None;
     }

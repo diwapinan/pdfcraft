@@ -201,9 +201,11 @@ fn leave_single(view: &mut DocView) {
 
 /// Returns true while group selection owns the interaction. Ordinary clicks still reach the
 /// single-object text/resize tools. A text draft is finished or discarded through its editor.
-/// diw edit: `added_only` (the Add text tool) selects added content only, with Shift or Ctrl and a
-/// click, and draws no area: a click on the page there still starts new text.
-pub(crate) fn page_input(cx: PageToolContext<'_>, view: &mut DocView, added_only: bool) -> bool {
+/// diw edit: `added_only` (any tool but Edit text & images, while added content can be edited)
+/// selects added content only, with Shift or Ctrl and a click, and draws no area. `keep_misses`
+/// (the Add text tool) keeps such a click beside the items, which would start new text there; with
+/// the Select tool it goes on to select page text.
+pub(crate) fn page_input(cx: PageToolContext<'_>, view: &mut DocView, added_only: bool, keep_misses: bool) -> bool {
     let PageToolContext { ui, xf, ptr, page, .. } = cx;
     if view.objects.input_blocked {
         return true;
@@ -222,12 +224,12 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, view: &mut DocView, added_only
         return false;
     }
     let mut selection = std::mem::take(&mut view.objects);
-    let result = input(&mut selection, cx, view, added_only);
+    let result = input(&mut selection, cx, view, added_only, keep_misses);
     view.objects = selection;
     result
 }
 
-fn input(s: &mut ObjectSelection, cx: PageToolContext<'_>, view: &mut DocView, added_only: bool) -> bool {
+fn input(s: &mut ObjectSelection, cx: PageToolContext<'_>, view: &mut DocView, added_only: bool, keep_misses: bool) -> bool {
     let PageToolContext { ui, resp, xf, ptr, page, doc, .. } = cx;
     let pointer = ptr.pos;
     let (pressed, down) = (ptr.pressed().is_some(), ptr.primary_down);
@@ -290,8 +292,11 @@ fn input(s: &mut ObjectSelection, cx: PageToolContext<'_>, view: &mut DocView, a
             let union = s.selected.iter().fold(Rect::NOTHING, |r, o| r.union(screen(xf, info, page, o)));
             if union.contains(p) {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
+                return true;
             }
-            return true;
+            // Elsewhere on the page the Select tool keeps its hover (links, text); the Add text tool
+            // keeps the release of a Shift+click beside the items too, which would start new text.
+            return !added_only || keep_misses;
         }
         return false;
     }
@@ -330,8 +335,9 @@ fn input(s: &mut ObjectSelection, cx: PageToolContext<'_>, view: &mut DocView, a
                 s.notice = Some(tl!("Select at most 1000 objects at a time.").into());
             }
         } else if added_only {
-            // Shift+click beside the items: nothing to add, and no new text either.
-            return true;
+            // Shift+click beside the items: nothing to add. The Add text tool starts no text with it;
+            // the Select tool extends its text selection.
+            return keep_misses;
         } else {
             s.gesture = Some(Gesture { start: p, now: p, marquee: true, additive: true });
         }

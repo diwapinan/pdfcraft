@@ -69,7 +69,9 @@ impl PdfCraftApp {
                 }
             }
             self.tool_keys(i, ctx);
-            if matches!(self.quick_tool, QuickTool::EditText | QuickTool::AddText)
+            let editing_content = (self.left_open && self.left == crate::LeftPanel::Tool("edit"))
+                || matches!(self.quick_tool, QuickTool::AddText | QuickTool::EditText);
+            if canvas::multi_select(self.quick_tool, editing_content)
                 && let Some(doc) = self.session.get(self.views[i].id).filter(|d| d.allows_modification())
             {
                 object_ui::nudge_keys(ctx, &mut self.views[i], doc);
