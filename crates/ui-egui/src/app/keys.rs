@@ -47,6 +47,7 @@ impl PdfCraftApp {
         // arrange and group keys of selected added content, before the commands sharing them (⌘D).
         self.content_actions(ctx);
         if page_chords
+            && chords
             && let Some(i) = self.active
             && self.dialog.is_none()
             && !self.palette_open

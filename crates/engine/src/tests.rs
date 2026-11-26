@@ -2024,7 +2024,7 @@ fn added_thai_text_prints_as_outlines_without_type3_fonts() {
     let (mut s, id) = session_with(1);
     let text =
         AddedText {
-            rect: [72.0, 600.0, 400.0, 700.0], text: "งาน Deck Slab".into(), bold: true, background: Some([1.0; 3]), ..AddedText::default()
+            rect: [10.0, 200.0, 190.0, 240.0], text: "งาน Deck Slab".into(), bold: true, background: Some([1.0; 3]), ..AddedText::default()
         };
     if pdfcraft_fonts::document_thai_font().is_none() {
         eprintln!("skipping the Thai print checks: built without a craft-fonts Thai face (set CRAFT_FONTS_DIR)");

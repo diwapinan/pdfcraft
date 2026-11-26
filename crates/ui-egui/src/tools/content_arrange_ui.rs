@@ -190,7 +190,9 @@ pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView) {
 /// The page's context menu over selected added content: Copy, Paste, Duplicate, Arrange, Group and
 /// Align. Returns whether it showed anything.
 pub(crate) fn context_menu(ui: &mut egui::Ui, view: &mut DocView, can_modify: bool, can_paste: bool) -> bool {
-    let Some((_, indices)) = selected_added(view) else {
+    // The selection's menu only where it is: a right-click on another page gets that page's menu.
+    let here = |page: usize| view.comments.context_at.is_none_or(|(at, _)| at == page);
+    let Some((_, indices)) = selected_added(view).filter(|(page, _)| here(*page)) else {
         if can_paste && can_modify {
             if ui.button(tl!("Paste")).clicked() {
                 view.content_action = Some(ContentAction::Paste);

@@ -552,6 +552,28 @@ fn invalidate_form_script_snapshot(cx: &mut EditCtx) {
     }
 }
 
+/// diw edit: Arrange and Group for added content (any other edit is left alone).
+fn run_content_arrange(doc: &mut pdfcraft_cos::Document, edit: &Edit) -> Result<(), EditError> {
+    match edit {
+        Edit::ArrangeContent { page, indices, layer } => {
+            pdfcraft_edit::arrange_content(doc, *page, indices, *layer)?;
+        }
+        Edit::GroupContent { page, indices, group } => {
+            let group = if *group {
+                if indices.len() < 2 {
+                    return Err(EditError::Edit(pdfcraft_edit::EditError::Invalid("select two or more items to group".into())));
+                }
+                Some(pdfcraft_edit::new_content_group(doc, *page))
+            } else {
+                None
+            };
+            pdfcraft_edit::set_content_group(doc, *page, indices, group)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Perform an edit on a working copy (the caller discards it on error).
 pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> Result<(), EditError> {
     match edit {
@@ -1038,20 +1060,7 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
             };
             pdfcraft_edit::add_content(doc, *page, &content)?;
         }
-        Edit::ArrangeContent { page, indices, layer } => {
-            pdfcraft_edit::arrange_content(doc, *page, indices, *layer)?;
-        }
-        Edit::GroupContent { page, indices, group } => {
-            let group = if *group {
-                if indices.len() < 2 {
-                    return Err(EditError::Edit(pdfcraft_edit::EditError::Invalid("select two or more items to group".into())));
-                }
-                Some(pdfcraft_edit::new_content_group(doc, *page))
-            } else {
-                None
-            };
-            pdfcraft_edit::set_content_group(doc, *page, indices, group)?;
-        }
+        Edit::ArrangeContent { .. } | Edit::GroupContent { .. } => run_content_arrange(doc, edit)?,
         Edit::ApplyRedactions { pages } => {
             let model = pdfcraft_model::pages(doc);
             cx.redaction_marks.extend(

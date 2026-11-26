@@ -709,6 +709,7 @@ mod tests {
                     PageToolContext { ui, resp: &resp, xf: &xf, ptr: &ptr, page: 0, doc, info: &info, keys: Default::default() },
                     PagePress::Free,
                     &mut view,
+                    false,
                 );
             },
         );

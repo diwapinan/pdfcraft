@@ -152,8 +152,8 @@ fn copy_and_paste_selected_content_keeps_its_group() {
     h.get_by_label("2 objects selected"); // two items are selected
     h.event(egui::Event::Copy);
     h.run_steps(4);
-    // ⌘V comes as the release of V (egui-winit keeps the press).
-    h.event(egui::Event::Key { key: Key::V, physical_key: None, pressed: false, repeat: false, modifiers: Modifiers::COMMAND });
+    // ⌘V arrives as a Paste of the text the copy put on the system clipboard.
+    h.event(egui::Event::Paste("A\nC".into()));
     h.run_steps(6);
     let after = added(&h);
     assert_eq!(texts(&h), "ABCAC", "Paste puts down the copied group");

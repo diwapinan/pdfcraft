@@ -829,7 +829,7 @@ const RAW_KEY_READS: [&str; 17] = [
 /// a window's or a field's own keys, which `PageKeys` would hide, and the pages' reads that
 /// `PageKeys` can't make (chords that wait for the menu bar instead, Escape ending what the pages
 /// hold, any key stopping a glide, the clipboard's hand-off to text fields): (file, function, why).
-const NOT_PAGE_KEYS: [(&str, &str, &str); 17] = [
+const NOT_PAGE_KEYS: [(&str, &str, &str); 18] = [
     (
         "app/clipboard.rs",
         "clipboard_keys",
@@ -840,6 +840,12 @@ const NOT_PAGE_KEYS: [(&str, &str, &str); 17] = [
         "app/keys.rs",
         "select_all_keys",
         "Select all, a chord that waits for a menu of the menu bar as the registered commands' do, and isn't called while something covers the pages",
+    ),
+    (
+        "tools/content_arrange_ui.rs",
+        "keys",
+        "diw edit: the arrange and group chords of selected added content, called from the app's keys only while \
+         nothing covers the pages (no dialog, palette, prompt or open menu), as the registered commands' are",
     ),
     ("canvas/area.rs", "glide_interrupted", "any key stops the touchpad's glide"),
     ("canvas/autoscroll.rs", "update_latched", "Escape ends the middle-button scroll, which holds the whole view"),
