@@ -484,7 +484,10 @@ fn app_creator<'a>(
             }
             app.motion.source = Some(motion::source());
         }
-        app.set_startup_update_check(true);
+        // diw edit: a labelled build ("diw edit") is unsigned and can't install the official
+        // updates, which would also take its changes away: it doesn't offer them at start.
+        // Help ▸ Check for updates still says what is new.
+        app.set_startup_update_check(pdfcraft_engine::build_info::LABEL.is_none_or(str::is_empty));
         app.printer_source = Some(pdfcraft_ui_egui::system_printers());
         app.two_sided_source = Some(pdfcraft_ui_egui::system_two_sided());
         app.os_key_store_ids = cfg!(any(target_os = "macos", target_os = "windows"));
