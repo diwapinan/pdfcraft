@@ -30,8 +30,7 @@ fn placed(t: &AddedText, r: [f64; 4], paragraphs: &[usize], i: usize, w: f64, sp
     let paragraph = paragraphs.get(i).copied().unwrap_or(0);
     let align = t.paragraph_align(paragraph);
     let ends_paragraph = paragraphs.get(i + 1) != Some(&paragraph);
-    let tw =
-        if align == Align::Justify && !ends_paragraph && spaces > 0 { ((r[2] - r[0]) - indent - w).max(0.0) / spaces as f64 } else { 0.0 };
+    let tw = if align == Align::Justify && !ends_paragraph && spaces > 0 { ((r[2] - r[0]) - indent - w).max(0.0) / spaces as f64 } else { 0.0 };
     let x = match align {
         // A right-to-left paragraph's unstretched last line ends at the right edge.
         Align::Justify if rtl => r[2] - indent - w - tw * spaces as f64,

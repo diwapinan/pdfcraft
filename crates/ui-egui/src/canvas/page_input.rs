@@ -121,12 +121,16 @@ pub(super) fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut
         // (`object_ui::modified_hit`): the page's objects are read for it alone. Crop mode holds
         // it on its page as any other press, so a modified click away applies the crop rather
         // than taking the picture into a group (#6422).
-        let adds = tool == QuickTool::EditText
+        // diw edit: with Add text, and Select with the Edit panel open, a press with Shift or ⌘ takes
+        // added items (Add text anywhere on the page, so a miss starts no text box; Select only on
+        // an added item, so elsewhere Shift still extends a text selection).
+        let adds = crate::canvas::multi_select(tool, editing_content)
             && can_modify
             && xf.rect.contains(o)
             && !hits.cropping(view)
             && crate::object_ui::adds(ptr.modifiers)
-            && !crate::object_ui::menu_open(ui, resp);
+            && !crate::object_ui::menu_open(ui, resp)
+            && (tool != QuickTool::Select || crate::content_ui::hits_added(&xf, info, i, added, o));
         let objects = adds.then(|| view.objects.inventory(doc, i));
         let at = hits.at(view, o, objects.as_ref());
         // A press is the page's it lies on, or past its edge the one whose selected picture has its
@@ -217,7 +221,9 @@ pub(super) fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut
     if tool == QuickTool::EditText && can_modify && gate {
         crate::edit_text_ui::picture_keys(ui.ctx(), keys, view, i, &images, ptr.any_down);
     }
-    let on_objects = tool == QuickTool::EditText && can_modify && crate::object_ui::page_input(cx, press, view);
+    let on_objects = crate::canvas::multi_select(tool, editing_content)
+        && can_modify
+        && crate::object_ui::page_input(cx, press, view, tool != QuickTool::EditText);
     let picks_up = matches!(tool, QuickTool::Select | QuickTool::AddText | QuickTool::EditText);
     let ccx = crate::content_ui::ContentCx {
         added,
@@ -596,7 +602,7 @@ impl PageHits<'_> {
         } = *self;
         // A press with Shift or ⌘ is the objects' (`object_ui::modified_hit`), off crop mode's page.
         if let Some(objects) = objects {
-            return crate::object_ui::modified_hit(view, xf, info, page, objects, clip, p).into_iter().collect();
+            return crate::object_ui::modified_hit(view, xf, info, page, objects, clip, p, tool != QuickTool::EditText).into_iter().collect();
         }
         // Crop mode holds every press on its page (`edit_text_ui::crop_hit`). A right-click is the
         // crop's only on the picture being cropped, its box or its grips (#5835), where it keeps crop
@@ -651,7 +657,11 @@ impl PageHits<'_> {
         let text_link = (text_links && link.is_none()).then(|| text_link_hit(view, info, xf, page, p)).flatten();
         let on_link = link.is_some() || text_link.is_some();
         let comment = if context { comments::context_hit(pcx, p) } else { comments::hit(pcx, view, p, on_link) };
-        [link, text_link, comment, pictures, paragraphs, added, objects, grips, corner, fields].into_iter().flatten().collect()
+        // diw edit: added items selected together move by a drag with Add text and Select too.
+        let together = (tool != QuickTool::EditText && crate::canvas::multi_select(tool, editing_content) && can_modify)
+            .then(|| crate::object_ui::hit(view, xf, info, page, None, p))
+            .flatten();
+        [link, text_link, comment, pictures, paragraphs, added, objects, together, grips, corner, fields].into_iter().flatten().collect()
     }
 }
 
@@ -1007,7 +1017,7 @@ pub(super) fn page_overlays(ui: &mut egui::Ui, view: &mut DocView, frame: &mut P
     if editing_content {
         crate::content_ui::paint_page(painter, &xf, i, info, added, view, pointer);
     }
-    if tool == QuickTool::EditText {
+    if crate::canvas::multi_select(tool, editing_content) {
         crate::object_ui::paint(painter, &xf, i, info, &view.objects);
     }
     if tool == QuickTool::EnhanceCamera {

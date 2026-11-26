@@ -78,9 +78,12 @@ impl PdfCraftApp {
             }
             self.tool_keys(i, ctx);
             let keys = self.page_keys;
-            if self.quick_tool == QuickTool::EditText
-                && let Some(doc) = self.session.get(self.views[i].id).filter(|d| d.allows_modification())
-            {
+            // diw edit: added items selected together with Add text or Select move with the arrows too.
+            let editing_content = (self.left_open && self.left == crate::LeftPanel::Tool("edit"))
+                || matches!(self.quick_tool, QuickTool::AddText | QuickTool::EditText);
+            let objects_keys =
+                self.quick_tool == QuickTool::EditText || canvas::multi_select(self.quick_tool, editing_content) && self.views[i].objects.count() > 0;
+            if objects_keys && let Some(doc) = self.session.get(self.views[i].id).filter(|d| d.allows_modification()) {
                 object_ui::nudge_keys(ctx, keys, &mut self.views[i], doc);
                 object_ui::delete_keys(ctx, keys, &mut self.views[i]);
             } else if let Some(doc) = self.session.get(self.views[i].id).filter(|d| d.allows_annotation()) {

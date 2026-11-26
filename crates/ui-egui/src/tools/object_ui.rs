@@ -299,11 +299,12 @@ pub(crate) fn hit(view: &DocView, xf: &PageXform, info: &DocInfo, page: usize, o
 
 /// The object under `p` among the page's `objects`: added content over text over pictures, so a
 /// page-sized background picture does not hide editable labels or added notes, and within each
-/// kind the last, as the single-item tools take it.
-fn object_at(xf: &PageXform, info: &DocInfo, page: usize, objects: &[EditableObject], p: Pos2) -> Option<ObjectTarget> {
-    [ObjectKind::Added, ObjectKind::Text, ObjectKind::Image]
-        .into_iter()
-        .find_map(|kind| objects.iter().rev().find(|o| o.target.kind == kind && screen(xf, info, page, o).expand(2.0).contains(p)))
+/// kind the last, as the single-item tools take it. diw edit: `added_only` takes added content alone.
+fn object_at(xf: &PageXform, info: &DocInfo, page: usize, objects: &[EditableObject], p: Pos2, added_only: bool) -> Option<ObjectTarget> {
+    let kinds: &[ObjectKind] = if added_only { &[ObjectKind::Added] } else { &[ObjectKind::Added, ObjectKind::Text, ObjectKind::Image] };
+    kinds
+        .iter()
+        .find_map(|kind| objects.iter().rev().find(|o| o.target.kind == *kind && screen(xf, info, page, o).expand(2.0).contains(p)))
         .map(|o| o.target)
 }
 
@@ -312,6 +313,8 @@ fn object_at(xf: &PageXform, info: &DocInfo, page: usize, objects: &[EditableObj
 /// the objects selected together or takes out of them, or none, where it starts an area selection
 /// that adds to them. Held while text being typed is open, and refused on a page whose objects
 /// can't be selected together. `None` off the page and outside the pages' visible area (`clip`).
+/// diw edit: `added_only` (Add text, Select) takes added content alone.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn modified_hit(
     view: &DocView,
     xf: &PageXform,
@@ -320,6 +323,7 @@ pub(crate) fn modified_hit(
     objects: &Result<Vec<EditableObject>, String>,
     clip: Rect,
     p: Pos2,
+    added_only: bool,
 ) -> Option<Hit> {
     if !xf.rect.contains(p) || !clip.contains(p) {
         return None;
@@ -328,7 +332,7 @@ pub(crate) fn modified_hit(
         ObjectsPart::Held
     } else {
         match objects {
-            Ok(objects) => ObjectsPart::Toggle(object_at(xf, info, page, objects, p)),
+            Ok(objects) => ObjectsPart::Toggle(object_at(xf, info, page, objects, p, added_only)),
             Err(_) => ObjectsPart::Refused,
         }
     };
@@ -339,8 +343,10 @@ pub(crate) fn modified_hit(
 /// true while they own the interaction: while input is blocked, while a press with Shift or ⌘ is
 /// held ([`modified_hit`]), and while objects on this page are selected or a gesture of theirs
 /// runs. Ordinary presses on a paragraph, a picture or added content still reach their own tools.
-/// A text draft is finished or discarded through its editor.
-pub(crate) fn page_input(cx: PageToolContext<'_>, press: PagePress, view: &mut DocView) -> bool {
+/// A text draft is finished or discarded through its editor. diw edit: `added_only` (Add text,
+/// Select with the Edit panel open) selects added content alone and draws no area: a press
+/// beside the items is the tool's own (a new text box, a text selection).
+pub(crate) fn page_input(cx: PageToolContext<'_>, press: PagePress, view: &mut DocView, added_only: bool) -> bool {
     let PageToolContext { ui, resp, ptr, page, .. } = cx;
     if view.objects.input_blocked {
         return true;
@@ -384,12 +390,12 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, press: PagePress, view: &mut D
         }
     }
     let mut selection = std::mem::take(&mut view.objects);
-    let result = input(&mut selection, cx, press, view);
+    let result = input(&mut selection, cx, press, view, added_only);
     view.objects = selection;
     result
 }
 
-fn input(s: &mut ObjectSelection, cx: PageToolContext<'_>, press: PagePress, view: &mut DocView) -> bool {
+fn input(s: &mut ObjectSelection, cx: PageToolContext<'_>, press: PagePress, view: &mut DocView, added_only: bool) -> bool {
     let PageToolContext { ui, resp, xf, ptr, page, doc, .. } = cx;
     let pointer = ptr.pos;
     let (pressed, down) = (ptr.pressed().is_some(), ptr.primary_down);
@@ -444,13 +450,15 @@ fn input(s: &mut ObjectSelection, cx: PageToolContext<'_>, press: PagePress, vie
         view.cursor.claim(Layer::Drag, if gesture.marquee { egui::CursorIcon::Crosshair } else { egui::CursorIcon::Move });
         return true;
     }
+    // With Add text and Select the rest of the page stays the tool's while items are selected.
+    let holds = s.page == Some(page) && !s.selected.is_empty() && !added_only;
     let Some(p) = pointer.filter(|p| xf.rect.contains(*p) && ui.clip_rect().contains(*p) && resp.rect.contains(*p)) else {
-        return s.page == Some(page) && !s.selected.is_empty();
+        return holds;
     };
     // Nor a press another page holds, on the row of pixels pages share with the gaps hidden: it may
     // have just selected something there.
     if !pressed || press == PagePress::Elsewhere {
-        return s.page == Some(page) && !s.selected.is_empty();
+        return holds;
     }
     let Ok(objects) = s.inventory(doc, page) else { return false };
     // What the press was on ([`hit`], [`modified_hit`]).
@@ -477,6 +485,8 @@ fn input(s: &mut ObjectSelection, cx: PageToolContext<'_>, press: PagePress, vie
                         s.notice = Some(tl!("Select at most 1000 objects at a time.").into());
                     }
                 }
+                // diw edit: Add text draws no area; the press beside the items is simply kept.
+                None if added_only => {}
                 None => s.gesture = Some(Gesture { start: p, now: p, marquee: true, additive: true }),
             }
             leave_single(view);
@@ -507,8 +517,8 @@ fn input(s: &mut ObjectSelection, cx: PageToolContext<'_>, press: PagePress, vie
     }
     s.clear();
     // A press on something (a paragraph, its edge reaching past its box #2276, a picture, added
-    // content) is its own; only one nobody holds starts an area selection.
-    if press != PagePress::Free {
+    // content) is its own; only one nobody holds starts an area selection, in Edit text alone.
+    if press != PagePress::Free || added_only {
         return false;
     }
     leave_single(view);

@@ -2308,6 +2308,13 @@ fn draw_pages(
     (wanted, visible_now)
 }
 
+/// diw edit: whether several objects can be selected together: Edit text & images (any object),
+/// or added content wherever it can be edited, Add text and Select with the Edit panel open (where
+/// Done leaves you).
+pub(crate) fn multi_select(tool: QuickTool, editing_content: bool) -> bool {
+    tool == QuickTool::EditText || editing_content && matches!(tool, QuickTool::Select | QuickTool::AddText)
+}
+
 /// A zoom the fit mode changed keeps the page at the top of the view in place, or, just after a
 /// find step, the match in the middle of the view (`avail` is the view's size).
 fn anchor_zoom_change(view: &mut DocView, avail: Vec2, old_zoom: f32) {
@@ -3438,13 +3445,13 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     } else {
         view.prepare.selected = None;
     }
-    view.objects.prepare(doc, tool == QuickTool::EditText && can_modify, ui.ctx(), keys);
+    view.objects.prepare(doc, multi_select(tool, editing_content) && can_modify, ui.ctx(), keys);
     view.text_background.prepare(ui.ctx(), doc, view.line_editor.as_ref(), view.content.draft.as_ref(), scale);
     let added = if editing_content { doc.added().to_vec() } else { Vec::new() };
     let doc_links = if tool == QuickTool::Link { doc.links().to_vec() } else { Vec::new() };
     if editing_content {
         crate::content_ui::after_refresh(view, &added);
-        crate::content_arrange_ui::follow_groups(view, doc, tool == QuickTool::EditText && can_modify);
+        crate::content_arrange_ui::follow_groups(view, doc, multi_select(tool, editing_content) && can_modify);
     } else {
         view.content.selected = None;
     }

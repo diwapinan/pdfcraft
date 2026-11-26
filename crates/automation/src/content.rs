@@ -273,7 +273,10 @@ impl Automation {
                 if a.get("text").is_some() {
                     return Err(bad("images have no text"));
                 }
-                if ["font", "size", "bold", "italic", "color", "gray", "cmyk", "align", "aligns", "char_spacing", "background", "list"].iter().any(|k| a.get(k).is_some()) {
+                if ["font", "size", "bold", "italic", "color", "gray", "cmyk", "align", "aligns", "char_spacing", "background", "list"]
+                    .iter()
+                    .any(|k| a.get(k).is_some())
+                {
                     return Err(bad("font, size, bold, italic, color, gray, cmyk, align, aligns, char_spacing, background and list apply to text"));
                 }
                 if let Some(deg) = a.opt_int("rotate")? {

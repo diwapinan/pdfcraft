@@ -76,7 +76,11 @@ pub(super) fn wrapped_lines(t: &AddedText) -> Vec<WrappedLine> {
         // At least one em of text beside the marker, however narrow the box.
         let body = (width - indent).max(t.size);
         for (i, (text, rtl)) in wrap_paragraph(t, para, body).into_iter().enumerate() {
-            out.push(if i == 0 { WrappedLine { text: format!("{marker}{text}"), rtl, indent: 0.0, para: index } } else { WrappedLine { text, rtl, indent, para: index } });
+            out.push(if i == 0 {
+                WrappedLine { text: format!("{marker}{text}"), rtl, indent: 0.0, para: index }
+            } else {
+                WrappedLine { text, rtl, indent, para: index }
+            });
         }
     }
     out
